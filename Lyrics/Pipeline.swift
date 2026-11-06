@@ -251,13 +251,25 @@ enum PipelineError: LocalizedError {
         beginUsage(lineNumber.map { "Translate line \($0)" } ?? (resume ? "Resume translation · \(remaining) lines" : "Translate all · \(song.wrappedValue.lines.count) lines"), song: song)
         task = Task {
             defer { running = false; active = nil; turn = nil; endUsage() }
+            song.wrappedValue.checkpoint("Before translation")
+            if only == nil && !resume && retryIDs == nil {
+                // Archive the previous work before starting a clean translation version.
+                // Clear once, outside the retry loop, so retries retain completed lines.
+                for index in song.wrappedValue.lines.indices {
+                    song.wrappedValue.lines[index].translated = ""
+                    song.wrappedValue.lines[index].review = ""
+                    song.wrappedValue.lines[index].approved = false
+                    song.wrappedValue.lines[index].translationTiming = nil
+                }
+            }
+            for retry in 0...3 {
             do {
-                song.wrappedValue.checkpoint("Before translation")
+                try Task.checkCancellation()
                 let settings = song.wrappedValue.agents
                 let context = song.wrappedValue.lines.enumerated().map { "\($0.offset + 1): \($0.element.label)\($0.element.original) → \($0.element.translated)" }.joined(separator: "\n")
                 let existingDirection = song.wrappedValue.direction.trimmingCharacters(in: .whitespacesAndNewlines)
                 let direction: String
-                if (resume || retryIDs != nil) && !existingDirection.isEmpty {
+                if (resume || retryIDs != nil || retry > 0) && !existingDirection.isEmpty {
                     direction = existingDirection
                 } else {
                     status = "Determining emotion and direction"
@@ -345,8 +357,28 @@ enum PipelineError: LocalizedError {
                     song.wrappedValue.checkpoint("Revised line \(index + 1)")
                 }
                 status = "Ready for your review"
-            } catch is CancellationError { status = "Stopped · completed lines preserved" }
-            catch { self.error = error.localizedDescription; canRetryTranslation = !pendingTranslationIDs.isEmpty; status = "Translation failed" }
+                return
+            } catch {
+                if Task.isCancelled || error is CancellationError {
+                    status = "Stopped · completed lines preserved"
+                    return
+                }
+                guard retry < 3, !pendingTranslationIDs.isEmpty else {
+                    self.error = error.localizedDescription
+                    canRetryTranslation = !pendingTranslationIDs.isEmpty
+                    status = "Translation failed after 3 retries"
+                    return
+                }
+                status = "Translation failed · retrying (\(retry + 1)/3)"
+                transcript += "\n\n— Automatic retry —\n\(status)\n\(error.localizedDescription)\n"
+                do {
+                    try await Task.sleep(for: .seconds(retry + 1))
+                } catch {
+                    status = "Stopped · completed lines preserved"
+                    return
+                }
+            }
+            }
         }
     }
 }

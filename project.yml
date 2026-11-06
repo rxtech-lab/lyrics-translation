@@ -9,6 +9,9 @@ options:
   deploymentTarget:
     macOS: '26.0'
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.8.0
   RxAuthSwift:
     url: https://github.com/rxtech-lab/RxAuthSwift
     exactVersion: 1.3.1
@@ -25,6 +28,7 @@ targets:
       - path: icon.icon
         buildPhase: resources
     dependencies:
+      - package: Sparkle
       - target: LyricPreview
         embed: true
       - target: LyricThumbnail
@@ -54,6 +58,9 @@ targets:
     info:
       path: Lyrics/Info.plist
       properties:
+        SUFeedURL: https://update.lyrics.rxlab.app/appcast.xml
+        SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
+        SUEnableAutomaticChecks: true
         RxAuthClientID: $(RXAUTH_CLIENT_ID)
         LyricStudioServerURL: $(LYRICSTUDIO_SERVER_URL)
         CFBundleURLTypes:

@@ -5,3 +5,10 @@ DerivedData/
 xcuserdata/
 .playwright-mcp/
 *.tsbuildinfo
+
+# Local release credentials (never commit)
+.release-secrets/
+
+# Python bytecode
+__pycache__/
+*.py[cod]

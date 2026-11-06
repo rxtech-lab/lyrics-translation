@@ -153,5 +153,8 @@ struct LyricDocument: FileDocument {
     }
 }
 @main struct LyricStudioApp: App {
-    var body: some Scene { DocumentGroup(newDocument: LyricDocument()) { file in StudioView(document: file.$document, title: file.fileURL?.deletingPathExtension().lastPathComponent ?? "") } }
+    @StateObject private var updates = AppUpdates()
+    var body: some Scene { DocumentGroup(newDocument: LyricDocument()) { file in StudioView(document: file.$document, title: file.fileURL?.deletingPathExtension().lastPathComponent ?? "") }
+        .commands { CommandGroup(after: .appInfo) { Button("Check for Updates…") { updates.check() }.disabled(!updates.available) } }
+    }
 }

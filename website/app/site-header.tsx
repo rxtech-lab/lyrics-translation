@@ -18,6 +18,6 @@ export default function SiteHeader({signedIn}: {signedIn: boolean}) {
 
   return <header className={`site-header${compact ? ' is-compact' : ''}`}>
     <Link className="brand" href="/"><img src="/icon.png" alt=""/>LyricStudio</Link>
-    <nav aria-label="Main navigation"><Link href="/discover">Discover</Link><AuthNavigation signedIn={signedIn}/></nav>
+    <nav aria-label="Main navigation"><Link href="/discover">Discover</Link><a href="https://update.lyrics.rxlab.app/LyricStudio.dmg">Download for Mac</a><AuthNavigation signedIn={signedIn}/></nav>
   </header>;
 }

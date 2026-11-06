@@ -80,8 +80,8 @@ struct TranslationTeamSheet: View {
             Button("Start from Beginning", role: .destructive) { dismiss(); onStart(false) }
         } message: {
             Text(remainingCount > 0
-                 ? "\(translatedCount) of \(song.lines.count) lines already have a translation. Resume keeps them and translates the rest. Starting from the beginning retranslates every line; the current translations are saved in Versions."
-                 : "Every line already has a translation. Starting again retranslates every line; the current translations are saved in Versions.")
+                 ? "\(translatedCount) of \(song.lines.count) lines already have a translation. Resume keeps them and translates the rest. Starting from the beginning saves the current translations in Versions, clears them, and starts a fresh translation."
+                 : "Every line already has a translation. Starting again saves the current translations in Versions, clears them, and starts a fresh translation.")
         }
     }
 
