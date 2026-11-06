@@ -19,8 +19,9 @@
 		647E450786795175F23C0BB4 /* TranslationTeamSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30D3031AE88B40531CE5997 /* TranslationTeamSheet.swift */; };
 		66A25B69EE1A823DFE35A357 /* MusicPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B95D185B8E16EFA2F1A255 /* MusicPlayback.swift */; };
 		6D6657BB8EF3B12FCE99CE2B /* PreviewSong.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD429D8797E7AA3D1D58321 /* PreviewSong.swift */; };
+		6E96C8552782097642AB7F4D /* RxAuthSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = D99A1D7CF9A001859AA4D7C7 /* RxAuthSwiftUI */; };
 		74B243B5BEEE8A26055490C3 /* KaraokeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E501A98DEDF6ECFFDAC261DD /* KaraokeSheet.swift */; };
-		7A4C94B90629D9BB64153419 /* RxAgentSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 995BE55FF01C334E1473E084 /* RxAgentSDK */; };
+		7A4C94B90629D9BB64153419 /* RxAuthSwift in Frameworks */ = {isa = PBXBuildFile; productRef = E91B2566DCAA7C68C7A68B09 /* RxAuthSwift */; };
 		7DBD61F5B5C753D1E0A5139E /* Karaoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E31492533949AE6A15F18A4 /* Karaoke.swift */; };
 		832181EA8B3F4361FEDC32F3 /* WordTimingEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 219CD9B1B06537457D4B6188 /* WordTimingEditor.swift */; };
 		9F40E2FD316116000B92767E /* OriginalLyricsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA6052EA2FAA44CEB23C2801 /* OriginalLyricsSheet.swift */; };
@@ -28,11 +29,13 @@
 		AB02F319A10D30F3F881239C /* PreviewSong.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD429D8797E7AA3D1D58321 /* PreviewSong.swift */; };
 		B1E72B7318602565F58A9F70 /* AgentModelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BDDEB133AA863719362729D /* AgentModelPicker.swift */; };
 		BD4498008C0D2A03FB33EF41 /* icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E124E93C894B82AC4A039346 /* icon.icon */; };
+		DA1950E1D7A932644038272B /* ShareLyricsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4D25FA07E7B2859B11423BE /* ShareLyricsSheet.swift */; };
 		DD0B78743272BBC90E57F193 /* AutoTimingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC1DB690713CE8D922F7CB1 /* AutoTimingSheet.swift */; };
 		EAAF49A8BFBA238E638AABE7 /* GatewayPricing.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE5859B29E98A621AA2EAF44 /* GatewayPricing.swift */; };
 		ECDED083D5F2AE3919C209CF /* LyricPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 82BB4D11DC1CE5A3EF9486ED /* LyricPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F0AAF79F35341E0201E8465C /* StudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F322F8E0233753FD8941057E /* StudioView.swift */; };
 		F747630B83E0C0FD9A33814A /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75698CA8071C7CDFFF5BBA25 /* ThumbnailProvider.swift */; };
+		F8C918D6252180D7AF4156B6 /* RxAgentSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 995BE55FF01C334E1473E084 /* RxAgentSDK */; };
 		FBED3A51BBEE469D305D4AAF /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B2422DE5825B7519231B63A /* PreviewViewController.swift */; };
 		FC0808A4932C0FC24DBE7A1D /* AutoTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B2D4D546A525ECC0798A2A6 /* AutoTiming.swift */; };
 		FE71EE515276FF8A62470D2C /* SystemAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB8D884C1FB0AF846276B95 /* SystemAudioCapture.swift */; };
@@ -89,6 +92,7 @@
 		86C9703B6195DDB42295188F /* Pipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pipeline.swift; sourceTree = "<group>"; };
 		91259A3A75691461BFE1EEC0 /* RxRemotion */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RxRemotion; path = "../rxlab/film-workflow/Packages/RxRemotion"; sourceTree = SOURCE_ROOT; };
 		A30D3031AE88B40531CE5997 /* TranslationTeamSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationTeamSheet.swift; sourceTree = "<group>"; };
+		A4D25FA07E7B2859B11423BE /* ShareLyricsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareLyricsSheet.swift; sourceTree = "<group>"; };
 		A8B95D185B8E16EFA2F1A255 /* MusicPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicPlayback.swift; sourceTree = "<group>"; };
 		B1DCB0966AD67998C3FBF3C1 /* LyricThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LyricThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BBDCBB177FCC372589BE7F21 /* LineDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineDetailView.swift; sourceTree = "<group>"; };
@@ -112,7 +116,9 @@
 			files = (
 				3B41A5B4ECD4536045E0A69F /* RxRemotion in Frameworks */,
 				AAD8DD77D05D1932C666E734 /* RxRemotionUI in Frameworks */,
-				7A4C94B90629D9BB64153419 /* RxAgentSDK in Frameworks */,
+				7A4C94B90629D9BB64153419 /* RxAuthSwift in Frameworks */,
+				6E96C8552782097642AB7F4D /* RxAuthSwiftUI in Frameworks */,
+				F8C918D6252180D7AF4156B6 /* RxAgentSDK in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +144,7 @@
 				A8B95D185B8E16EFA2F1A255 /* MusicPlayback.swift */,
 				FA6052EA2FAA44CEB23C2801 /* OriginalLyricsSheet.swift */,
 				86C9703B6195DDB42295188F /* Pipeline.swift */,
+				A4D25FA07E7B2859B11423BE /* ShareLyricsSheet.swift */,
 				F322F8E0233753FD8941057E /* StudioView.swift */,
 				EAB8D884C1FB0AF846276B95 /* SystemAudioCapture.swift */,
 				A30D3031AE88B40531CE5997 /* TranslationTeamSheet.swift */,
@@ -230,6 +237,8 @@
 			packageProductDependencies = (
 				C6343E09BC494AD52431802F /* RxRemotion */,
 				7C2A9F417AF35748C941C562 /* RxRemotionUI */,
+				E91B2566DCAA7C68C7A68B09 /* RxAuthSwift */,
+				D99A1D7CF9A001859AA4D7C7 /* RxAuthSwiftUI */,
 				995BE55FF01C334E1473E084 /* RxAgentSDK */,
 			);
 			productName = LyricStudio;
@@ -278,8 +287,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = EF9256FAD1A092758914DAF5 /* Build configuration list for PBXProject "LyricStudio" */;
 			developmentRegion = en;
@@ -291,6 +298,7 @@
 			mainGroup = 42D530BB399DF1BBB93A659A;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				DEBEA83D62C817FA31C46089 /* XCRemoteSwiftPackageReference "RxAuthSwift" */,
 				36C8F76C4044D16327D391A3 /* XCLocalSwiftPackageReference "../rxlab/RxAgentSDK" */,
 				FDC7724B1CD0F6C3A677FF17 /* XCLocalSwiftPackageReference "../rxlab/film-workflow/Packages/RxRemotion" */,
 			);
@@ -354,6 +362,7 @@
 				66A25B69EE1A823DFE35A357 /* MusicPlayback.swift in Sources */,
 				9F40E2FD316116000B92767E /* OriginalLyricsSheet.swift in Sources */,
 				54F53F3655BABAED6C7FA4BE /* Pipeline.swift in Sources */,
+				DA1950E1D7A932644038272B /* ShareLyricsSheet.swift in Sources */,
 				F0AAF79F35341E0201E8465C /* StudioView.swift in Sources */,
 				FE71EE515276FF8A62470D2C /* SystemAudioCapture.swift in Sources */,
 				647E450786795175F23C0BB4 /* TranslationTeamSheet.swift in Sources */,
@@ -381,7 +390,10 @@
 		261AFAA825CCC95395B6B554 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7GYB573Y6;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = QuickLook/Preview/Info.plist;
@@ -391,6 +403,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.rxlab.LyricStudio.LyricPreview;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
@@ -402,14 +415,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_ENTITLEMENTS = Lyrics/App.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7GYB573Y6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Lyrics/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LYRICSTUDIO_SERVER_URL = "https://lyrics.rxlab.app";
 				PRODUCT_BUNDLE_IDENTIFIER = app.rxlab.LyricStudio;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RXAUTH_CLIENT_ID = client_366ef1a6f5d248df941dc9e02947f0cc;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
 			};
@@ -418,7 +437,10 @@
 		440233913FA591C38AF0E920 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7GYB573Y6;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = QuickLook/Thumbnail/Info.plist;
@@ -428,6 +450,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.rxlab.LyricStudio.LyricThumbnail;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
@@ -437,7 +460,10 @@
 		5EEB2452132C5030858DD37B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7GYB573Y6;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = QuickLook/Thumbnail/Info.plist;
@@ -447,6 +473,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.rxlab.LyricStudio.LyricThumbnail;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
@@ -456,7 +483,10 @@
 		90543DDC1C8B8A909C3E36C9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7GYB573Y6;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = QuickLook/Preview/Info.plist;
@@ -466,6 +496,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.rxlab.LyricStudio.LyricPreview;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
@@ -540,14 +571,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_ENTITLEMENTS = Lyrics/App.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7GYB573Y6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Lyrics/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LYRICSTUDIO_SERVER_URL = "http://localhost:3000";
 				PRODUCT_BUNDLE_IDENTIFIER = app.rxlab.LyricStudio;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RXAUTH_CLIENT_ID = client_366ef1a6f5d248df941dc9e02947f0cc;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
 			};
@@ -661,6 +698,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		DEBEA83D62C817FA31C46089 /* XCRemoteSwiftPackageReference "RxAuthSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/rxtech-lab/RxAuthSwift";
+			requirement = {
+				kind = exactVersion;
+				version = 1.3.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		7C2A9F417AF35748C941C562 /* RxRemotionUI */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -673,6 +721,16 @@
 		C6343E09BC494AD52431802F /* RxRemotion */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RxRemotion;
+		};
+		D99A1D7CF9A001859AA4D7C7 /* RxAuthSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DEBEA83D62C817FA31C46089 /* XCRemoteSwiftPackageReference "RxAuthSwift" */;
+			productName = RxAuthSwiftUI;
+		};
+		E91B2566DCAA7C68C7A68B09 /* RxAuthSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DEBEA83D62C817FA31C46089 /* XCRemoteSwiftPackageReference "RxAuthSwift" */;
+			productName = RxAuthSwift;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

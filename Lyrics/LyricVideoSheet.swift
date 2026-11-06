@@ -172,15 +172,18 @@ struct LyricVideoSheet: View {
     import song from './song.json';
     const Scene = () => {
       const f = useCurrentFrame(), t = f / 30;
-      const line = song.lines.find(l => t >= l.words[0].start && t < l.words[l.words.length-1].end + 0.25);
-      const enter = line ? spring({frame: f - Math.floor(line.words[0].start * 30), fps:30, config:{damping:18}}) : 0;
+      // Every line sung at this moment, in lyric order, so overlapping singers show together.
+      const lines = song.lines.filter(l => t >= l.words[0].start && t < l.words[l.words.length-1].end + 0.25);
+      const many = lines.length > 1;
       return <AbsoluteFill style={{background:'#090c20',color:'white',fontFamily:'Arial',padding:80,justifyContent:'center'}}>
         <AbsoluteFill style={{background:`radial-gradient(ellipse at ${40+20*Math.sin(t/4)}% 40%, #40316b, transparent 75%)`}}/>
         <div style={{position:'absolute',top:55,left:80,fontSize:24,letterSpacing:4,color:'#b5aacd'}}>{song.title}</div>
-        {line && <div style={{position:'relative',textAlign:'center',opacity:enter,transform:`translateY(${(1-enter)*40}px)`}}>
-          <div style={{fontSize:64,fontWeight:800,lineHeight:1.4,whiteSpace:'pre-wrap'}}>{line.words.map((w,i)=><span key={i} style={{color:t>=w.start?'#f5cc78':'#aaa2bd',display:'inline-block',transform:`scale(${t>=w.start&&t<w.end?1.06:1})`}}>{w.text}</span>)}</div>
-          <div style={{fontSize:30,color:'#c8c0d8',marginTop:28}}>{line.subtitle}</div>
-        </div>}
+        <div style={{display:'flex',flexDirection:'column',gap:many?36:0}}>{lines.map((line,n)=>{
+          const enter = spring({frame: f - Math.floor(line.words[0].start * 30), fps:30, config:{damping:18}});
+          return <div key={line.words[0].start+':'+n} style={{position:'relative',textAlign:'center',opacity:enter,transform:`translateY(${(1-enter)*40}px)`}}>
+            <div style={{fontSize:many?52:64,fontWeight:800,lineHeight:1.3,whiteSpace:'pre-wrap'}}>{line.words.map((w,i)=><span key={i} style={{color:t>=w.start?'#f5cc78':'#aaa2bd',display:'inline-block',transform:`scale(${t>=w.start&&t<w.end?1.06:1})`}}>{w.text}</span>)}</div>
+            {line.subtitle && <div style={{fontSize:many?26:30,color:'#c8c0d8',marginTop:many?14:28}}>{line.subtitle}</div>}
+          </div>;})}</div>
         {song.audio && <Audio src={staticFile(song.audio)}/>}
       </AbsoluteFill>;
     };

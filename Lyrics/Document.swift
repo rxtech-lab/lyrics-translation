@@ -74,6 +74,7 @@ struct UsageStatsCache: Codable, Hashable, Sendable {
     var records: [UUID: PricedUsage] = [:]
 }
 struct Song: Codable {
+    var publicationID: UUID?
     var target = "English"
     var direction = ""
     var lines: [LyricLine] = []

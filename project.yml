@@ -1,9 +1,17 @@
 name: LyricStudio
+settings:
+  base:
+    DEVELOPMENT_TEAM: T7GYB573Y6
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: Apple Development
 options:
   bundleIdPrefix: app.rxlab
   deploymentTarget:
     macOS: '26.0'
 packages:
+  RxAuthSwift:
+    url: https://github.com/rxtech-lab/RxAuthSwift
+    exactVersion: 1.3.1
   RxRemotion:
     path: ../rxlab/film-workflow/Packages/RxRemotion
   RxAgentSDK:
@@ -25,6 +33,10 @@ targets:
         product: RxRemotion
       - package: RxRemotion
         product: RxRemotionUI
+      - package: RxAuthSwift
+        product: RxAuthSwift
+      - package: RxAuthSwift
+        product: RxAuthSwiftUI
       - package: RxAgentSDK
     settings:
       base:
@@ -33,9 +45,20 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: app.rxlab.LyricStudio
         CODE_SIGN_ENTITLEMENTS: Lyrics/App.entitlements
+        RXAUTH_CLIENT_ID: client_366ef1a6f5d248df941dc9e02947f0cc
+      configs:
+        Debug:
+          LYRICSTUDIO_SERVER_URL: http://localhost:3000
+        Release:
+          LYRICSTUDIO_SERVER_URL: https://lyrics.rxlab.app
     info:
       path: Lyrics/Info.plist
       properties:
+        RxAuthClientID: $(RXAUTH_CLIENT_ID)
+        LyricStudioServerURL: $(LYRICSTUDIO_SERVER_URL)
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [lyricstudio]
+            CFBundleURLName: app.rxlab.LyricStudio.oauth
         NSAppleMusicUsageDescription: Lyric Studio plays the Apple Music recording of your song so you can time karaoke subtitles word by word.
         NSSpeechRecognitionUsageDescription: Lyric Studio listens to your copy of the recording on this Mac to detect when each lyric word is sung.
         CFBundleDocumentTypes:

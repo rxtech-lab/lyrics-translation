@@ -33,12 +33,27 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.rxlab.LyricStudio.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lyricstudio</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LyricStudioServerURL</key>
+	<string>$(LYRICSTUDIO_SERVER_URL)</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Lyric Studio plays the Apple Music recording of your song so you can time karaoke subtitles word by word.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lyric Studio listens to your copy of the recording on this Mac to detect when each lyric word is sung.</string>
+	<key>RxAuthClientID</key>
+	<string>$(RXAUTH_CLIENT_ID)</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

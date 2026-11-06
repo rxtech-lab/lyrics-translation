@@ -1,0 +1,3 @@
+import Link from 'next/link';
+export const metadata={title:'Share from LyricStudio'};
+export default function Share(){return <main className="page narrow"><p className="eyebrow">FROM YOUR STUDIO TO THE WORLD</p><h1>Made in the app.<br/><em>Shared with everyone.</em></h1><div className="glass card"><h2>Publish from LyricStudio for Mac</h2><p>Open your song in the app, choose Song → Share Translation, then sign in to publish. Your lyrics, linked recording, and token usage appear together on the web.</p><p>Here on the website, discover translations, listen, and sign in to star your favorites.</p><Link className="primary" href="/discover">Explore translations ↗</Link></div></main>}

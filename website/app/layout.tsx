@@ -1,0 +1,4 @@
+import {identity} from '@/lib/auth';
+import './style.css';import SiteHeader from './site-header';import type {Metadata} from 'next';
+export const metadata:Metadata={metadataBase:new URL(process.env.SITE_URL||'http://localhost:3000'),title:{default:'LyricStudio — Words in motion',template:'%s · LyricStudio'},description:'Translate the feeling. Keep the rhythm. A studio for lyrics that travel across languages.',openGraph:{title:'LyricStudio — Words in motion',description:'Lyrics without borders. Translation with soul.',type:'website'},twitter:{card:'summary_large_image'}};
+export default async function Layout({children}:{children:React.ReactNode}){let signedIn=false;try{signedIn=Boolean(await identity());}catch{}return <html lang="en"><body><SiteHeader signedIn={signedIn}/>{children}<footer>LyricStudio <span>Made for the way music makes you feel.</span></footer></body></html>}

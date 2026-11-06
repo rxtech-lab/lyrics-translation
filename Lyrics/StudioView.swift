@@ -10,6 +10,8 @@ struct StudioView: View {
     @State private var pendingDelete: Set<UUID>?
     @State private var pendingClear: Set<UUID>?
     @State private var video = false
+    @State private var sharing = false
+    @State private var shareLineIDs: Set<UUID>?
     @State private var sheet: String?
     @State private var editingOriginal = false
     @State private var team: Bool?
@@ -80,7 +82,11 @@ struct StudioView: View {
             List(selection: $selection) {
                 ForEach(Array(document.song.lines.enumerated()), id: \.element.id) { index, line in
                     VStack(alignment: .leading, spacing: 5) {
-                        if let tag = line.tag { Text(tag).font(.caption.weight(.semibold)).foregroundStyle(.tint) }
+                        if let tag = line.tag {
+                            Text(tag)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(selection.contains(line.id) ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
+                        }
                         Text("\(index + 1)  \(line.original)").lineLimit(2)
                         Text(line.approved ? "Approved" : line.translated.isEmpty ? "Original" : "Awaiting review").font(.caption).foregroundStyle(.secondary)
                     }.padding(.vertical, 5).tag(line.id)
@@ -88,6 +94,11 @@ struct StudioView: View {
             }
             .contextMenu(forSelectionType: UUID.self) { ids in
                 if !ids.isEmpty {
+                    Button(ids.count == 1 ? "Share Line…" : "Share \(ids.count) Lines…", systemImage: "square.and.arrow.up") {
+                        shareLineIDs = ids
+                        sharing = true
+                    }
+                    Divider()
                     let translated = translatedIDs(in: ids)
                     Button(translated.count == 1 ? "Delete Translation" : "Delete \(translated.count) Translations", systemImage: "eraser", role: .destructive) { pendingClear = translated }.disabled(translated.isEmpty || pipeline.running)
                     Button(ids.count == 1 ? "Delete Line" : "Delete \(ids.count) Lines", systemImage: "trash", role: .destructive) { pendingDelete = ids }.disabled(pipeline.running)
@@ -103,7 +114,7 @@ struct StudioView: View {
                     ContentUnavailableView {
                         Label("\(selection.count) lines selected", systemImage: "text.badge.checkmark")
                     } description: {
-                        Text("Press Delete or right-click to remove them.")
+                        Text("Right-click to share the selected lines, or press Delete to remove them.")
                     } actions: {
                         let translated = translatedIDs(in: selection)
                         Button(translated.count == 1 ? "Delete Translation" : "Delete \(translated.count) Translations", role: .destructive) { pendingClear = translated }.disabled(translated.isEmpty || pipeline.running)
@@ -136,6 +147,7 @@ struct StudioView: View {
             // Setup: everything that shapes the song before/around translation.
             ToolbarItem(placement: .primaryAction) {
                 Menu("Song", systemImage: "doc.text") {
+                    Button("Share Translation…", systemImage: "square.and.arrow.up") { shareLineIDs = nil; sharing = true }
                     Button("Edit Original Lyrics…", systemImage: "doc.text") { editingOriginal = true }
                     Button("Translation Agents…", systemImage: "person.3") { team = false }
                     Divider()
@@ -239,6 +251,7 @@ struct StudioView: View {
             TranslationTeamSheet(song: $document.song, startsTranslation: team ?? false) { resume in pipeline.start(song: $document.song, resume: resume) }
         }
         .sheet(isPresented: $chatting) { ConversationSheet(song: document.song) }
+        .sheet(isPresented: $sharing) { ShareLyricsSheet(song: $document.song, title: title, initialLineIDs: shareLineIDs) }
         .sheet(isPresented: $showingUsage) { UsageSheet(song: $document.song) }
         .sheet(isPresented: $video) { LyricVideoSheet(song: document.song, title: title) }
         .sheet(isPresented: $karaoke) { KaraokeSheet(song: $document.song, title: title) }

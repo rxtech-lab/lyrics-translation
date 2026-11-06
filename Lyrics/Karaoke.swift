@@ -28,6 +28,27 @@ enum KaraokeTrack: String, CaseIterable, Identifiable {
     var other: KaraokeTrack { self == .original ? .translation : .original }
 }
 
+/// Which lyrics the karaoke stage shows.
+enum LyricDisplay: String, CaseIterable, Identifiable {
+    case both, original, translation
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .both: "Original + Translation"
+        case .original: "Original"
+        case .translation: "Translation"
+        }
+    }
+    /// The only track shown, or nil when both are.
+    var single: KaraokeTrack? {
+        switch self {
+        case .both: nil
+        case .original: .original
+        case .translation: .translation
+        }
+    }
+}
+
 extension TimedWord {
     /// Splits text into timeable words. Spaced scripts split on whitespace; Chinese and Japanese split per character,
     /// keeping punctuation attached to the character before it.

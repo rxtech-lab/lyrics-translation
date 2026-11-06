@@ -17,6 +17,47 @@ struct FormattedLyrics: Decodable {
 struct RhymeVerdict: Decodable {
     let passes: Bool
     let corrections: String
+    let checks: [Check]
+    struct Check: Decodable {
+        let group: Int
+        let candidateWords: String
+        let pronunciation: String
+        let partnerEvidence: String
+        let matches: Bool
+    }
+    func accepts(groups: [Int]) -> Bool {
+        passes && groups.allSatisfy { group in
+            let evidence = checks.filter { $0.group == group }
+            return evidence.count == 1 && evidence.allSatisfy {
+                $0.matches && !$0.candidateWords.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                !$0.pronunciation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                !$0.partnerEvidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+    }
+}
+
+struct TranslationRhymePlan: Decodable {
+    struct Group: Decodable {
+        let id: Int
+        let lines: [Int]
+        let sound: String
+        let kind: String
+        let anchor: String?
+    }
+    let groups: [Group]
+    let conflicts: [String]
+    func validate(lineCount: Int) throws {
+        guard conflicts.isEmpty else {
+            throw PipelineError.invalid("Rhyme constraints conflict: " + conflicts.joined(separator: "; "))
+        }
+        guard Set(groups.map(\.id)).count == groups.count,
+              groups.allSatisfy({ ["end", "internal"].contains($0.kind) && !$0.lines.isEmpty && Set($0.lines).count == $0.lines.count &&
+                  $0.lines.allSatisfy { (1...max(1, lineCount)).contains($0) } &&
+                  !$0.sound.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw PipelineError.invalid("Invalid target-language rhyme groups.")
+        }
+    }
 }
 
 struct Analysis: Decodable {
@@ -232,10 +273,18 @@ enum PipelineError: LocalizedError {
                 Existing translations of lines not being replaced are fixed anchors; choose compatible sounds.
                 Scope: only the editable line numbers listed below; all other translations are fixed.
                 Editable line numbers: \(song.wrappedValue.lines.enumerated().filter { pendingTranslationIDs.contains($0.element.id) }.map { $0.offset + 1 }).
-                If fixed anchors conflict, prioritize explicit user rhyme direction, then the local end-rhyme group.
-                Explicitly list incompatible secondary relationships as waived with phonetic reasons; do not demand edits outside the editable scope.
+                Every genuine source rhyme relationship must belong to a group, including internal rhymes.
+                Never waive a relationship to make a candidate pass. If fixed translations cannot satisfy all groups,
+                report conflicts; do not demand edits outside the editable scope.
+                Return JSON only: {"groups":[{"id":1,"lines":[1,2],"sound":"target-language phonetic rhyme nucleus and coda","kind":"end","anchor":"target-language example ending word"}],"conflicts":[]}.
+                Each group has a unique integer id, 1-based member line numbers, and a concrete target-language sound.
+                Set kind to end or internal. Split end and internal relationships into separate groups. For Mandarin end groups, anchor must be a Chinese example ending word with the planned pronunciation. An internal-only group has one member. Use an empty groups array only when no genuine rhymes exist.
+                For Mandarin compare spoken finals (including nasal codas), not characters or tone alone.
+                Direction and explicit user requirements: \(direction)
                 Include internal rhymes and explicit line numbers. Lyrics: \(context)
                 """, step: "Rhyme plan")
+                let plan = try LenientJSON.decode(TranslationRhymePlan.self, from: rhymePlan, agent: "Rhyme planner")
+                try plan.validate(lineCount: song.wrappedValue.lines.count)
                 for index in song.wrappedValue.lines.indices {
                     let line = song.wrappedValue.lines[index]
                     guard pendingTranslationIDs.contains(line.id) else { continue }
@@ -247,7 +296,11 @@ enum PipelineError: LocalizedError {
                     song.wrappedValue.lines[index].syllables = analysis.syllables
                     song.wrappedValue.lines[index].stress = analysis.stress
                     song.wrappedValue.setRhymes(analysis.rhymes, at: index)
-                    let constraints = base + " Mandatory target-language rhyme plan: \(rhymePlan). The target-language plan defines enforceable rhyme relationships. Source analysis is descriptive, not an additional mandatory constraint. Honor explicit user scope and rhyme direction. For incompatible fixed anchors, enforce the chosen local rhyme group and report secondary conflicts as limitations, not candidate failures. Never require editing another line to pass this candidate. Use planned sounds for future editable partners. Rhythm and rhyme: \(raw). Current translations: \(song.wrappedValue.lines.map(\.translated)). Match syllables, stress, vowel singability, meaning and rhyme."
+                    let requiredGroups = plan.groups.filter { $0.lines.contains(index + 1) }.map(\.id)
+                    let currentTranslations = song.wrappedValue.lines.enumerated().map {
+                        "\($0.offset + 1): \($0.element.translated)"
+                    }.joined(separator: "\n")
+                    let constraints = base + " Mandatory target-language rhyme plan: \(rhymePlan). The target-language plan defines enforceable rhyme relationships. Source analysis is descriptive, not an additional mandatory constraint. Honor explicit user scope and rhyme direction. Every assigned group is mandatory; never waive conflicts. Match the actual current translations of already completed and fixed partners. For pending editable partners match the exact planned sound. Prioritize audible rhyme over literal wording while preserving narrative meaning. Do not accept loose assonance as a perfect end rhyme. Rhythm and rhyme: \(raw). Current numbered translations (supersede old translations in Full song): \(currentTranslations). Pending editable lines: \(song.wrappedValue.lines.enumerated().filter { pendingTranslationIDs.contains($0.element.id) }.map { $0.offset + 1 }). Required group IDs: \(requiredGroups). Match syllables, stress, vowel singability, meaning and rhyme."
                     status = "Line \(index + 1): translating"
                     let draft = try await ask(settings[2], constraints + " Return only the translated lyric line.", step: "Line \(index + 1) · Draft")
                     status = "Line \(index + 1): reviewing"
@@ -261,18 +314,26 @@ enum PipelineError: LocalizedError {
                         status = "Line \(index + 1): checking rhymes (\(attempt + 1)/3)"
                         let verdictText = try await ask(settings[3], constraints + """
                          Independently verify this candidate's target-language pronunciation against the mandatory rhyme plan,
-                         internal rhymes and the partner lines required by that plan. Do not reintroduce waived or incompatible secondary source relationships. Explain such limitations in corrections even when passes is true. Future editable partners must match the planned sound.
+                         internal rhymes and the partner lines required by that plan. No assigned group may be waived. Compare actual spoken words and their positions in this candidate and completed/fixed partners. Future editable partners must match the planned sound. Reject mismatched finals, missing internal rhymes, or incompatible fixed partners.
                          Check rhyme relationships, not identical sounds across languages. Do not pass merely because spelling matches.
                          Preserve meaning and singability. If there are no source rhymes, do not require invented ones.
-                         Return JSON only: {"passes":true,"corrections":"phonetic evidence, or specific corrections if failing"}.
+                         Return JSON only: {"passes":true,"corrections":"specific phonetic evidence or repair instructions","checks":[{"group":1,"candidateWords":"actual rhyming words in candidate","pronunciation":"IPA or pinyin finals","partnerEvidence":"numbered partner words and pronunciation; for future partners cite planned sound; for internal rhyme cite both words","matches":true}]}.
+                         Include exactly one check for each required group ID. passes must be false if any group fails.
+                         For Mandarin, shi, xing and ang are different finals; shared tone or spelling is insufficient.
                          Candidate: \(revised)
                         """, step: "Line \(index + 1) · Rhyme check")
                         let verdict = try LenientJSON.decode(RhymeVerdict.self, from: verdictText, agent: "Rhyme checker")
                         rhymeFeedback = verdict.corrections
-                        if verdict.passes { accepted = true; break }
+                        let localFailures = MandarinRhyme.failures(candidate: revised, index: index, plan: plan,
+                            translations: song.wrappedValue.lines.map(\.translated),
+                            pending: Set(song.wrappedValue.lines.enumerated().filter { pendingTranslationIDs.contains($0.element.id) }.map { $0.offset }),
+                            target: song.wrappedValue.target)
+                        if !localFailures.isEmpty { rhymeFeedback += "\nLocal Mandarin check: " + localFailures.joined(separator: "; ") }
+                        if localFailures.isEmpty && verdict.accepts(groups: requiredGroups) { accepted = true; break }
+                        rhymeFeedback += " Required groups: \(requiredGroups). Supply complete pronunciation checks for every group."
                         if attempt < 2 {
                             status = "Line \(index + 1): correcting rhymes"
-                            revised = try await ask(settings[4], constraints + " Repair these rhyme failures: \(verdict.corrections). Candidate: \(revised). Return only the corrected lyric line.", step: "Line \(index + 1) · Rhyme repair")
+                            revised = try await ask(settings[4], constraints + " Repair these rhyme failures: \(rhymeFeedback). Candidate: \(revised). Return only the corrected lyric line.", step: "Line \(index + 1) · Rhyme repair")
                         }
                     }
                     guard accepted else { throw PipelineError.invalid("Line \(index + 1) failed rhyme verification after two repairs. Previous translation preserved. \(rhymeFeedback)") }
@@ -286,6 +347,75 @@ enum PipelineError: LocalizedError {
                 status = "Ready for your review"
             } catch is CancellationError { status = "Stopped · completed lines preserved" }
             catch { self.error = error.localizedDescription; canRetryTranslation = !pendingTranslationIDs.isEmpty; status = "Translation failed" }
+        }
+    }
+}
+
+
+/// Conservative Mandarin end-rhyme gate. Internal rhyme positions remain model-reviewed.
+enum MandarinRhyme {
+    static func isMandarin(_ target: String) -> Bool {
+        let value = target.lowercased()
+        return ["chinese", "mandarin", "中文", "普通话", "普通話", "汉语", "漢語", "简体", "繁體", "繁体"].contains { value.contains($0) }
+            || value == "zh" || value.hasPrefix("zh-")
+    }
+
+    static func final(in text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard let last = trimmed.unicodeScalars.last,
+              (0x3400...0x9fff).contains(last.value) || (0x20000...0x3134f).contains(last.value),
+              let latin = trimmed.applyingTransform(.toLatin, reverse: false) else { return nil }
+        // Preserve umlaut before removing tone marks: lu and lü must stay distinct.
+        let decomposed = latin.lowercased().decomposedStringWithCanonicalMapping
+        var toneless = ""
+        for scalar in decomposed.unicodeScalars {
+            if scalar.value == 0x308 {
+                if toneless.last == "u" { toneless.removeLast(); toneless.append("v") }
+            } else if !CharacterSet.nonBaseCharacters.contains(scalar) {
+                toneless.unicodeScalars.append(scalar)
+            }
+        }
+        let syllables = toneless
+            .split(whereSeparator: { !$0.isLetter })
+        guard var syllable = syllables.last.map(String.init) else { return nil }
+        let zeroInitial = ["yi":"i", "ya":"ia", "ye":"ie", "yao":"iao", "you":"iou",
+            "yan":"ian", "yin":"in", "yang":"iang", "ying":"ing", "yong":"iong",
+            "yu":"v", "yue":"ve", "yuan":"van", "yun":"vn",
+            "wu":"u", "wa":"ua", "wo":"uo", "wai":"uai", "wei":"uei", "wan":"uan", "wen":"uen", "wang":"uang", "weng":"ueng"]
+        if let expanded = zeroInitial[syllable] { syllable = expanded }
+        else {
+            if ["zi", "ci", "si"].contains(syllable) { return "apical-dental" }
+            if ["zhi", "chi", "shi", "ri"].contains(syllable) { return "apical-retroflex" }
+            if let initial = ["zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "r", "z", "c", "s"].first(where: { syllable.hasPrefix($0) }) {
+                syllable.removeFirst(initial.count)
+                if ["j", "q", "x"].contains(initial), syllable.hasPrefix("u") {
+                    syllable.replaceSubrange(syllable.startIndex...syllable.startIndex, with: "v")
+                }
+            }
+        }
+        syllable = ["iu":"iou", "ui":"uei", "un":"uen", "vn":"vn"][syllable] ?? syllable
+        // Ignore medial glides only where the nucleus and coda are unchanged.
+        let families = ["ia":"a", "ua":"a", "uo":"o", "uai":"ai", "uei":"ei",
+            "iao":"ao", "iou":"ou", "uan":"an", "iang":"ang", "uang":"ang", "ueng":"eng", "uen":"en"]
+        let valid: Set<String> = ["a","o","e","ai","ei","ao","ou","an","en","ang","eng","ong","i","ia","ie","iao","iou","ian","in","iang","ing","iong","u","ua","uo","uai","uei","uan","uen","uang","ueng","v","ve","van","vn","er"]
+        guard valid.contains(syllable) else { return nil }
+        return families[syllable] ?? syllable
+    }
+
+    static func failures(candidate: String, index: Int, plan: TranslationRhymePlan,
+                         translations: [String], pending: Set<Int>, target: String) -> [String] {
+        guard isMandarin(target) else { return [] }
+        return plan.groups.filter { $0.kind == "end" && $0.lines.contains(index + 1) }.compactMap { group in
+            guard let actual = final(in: candidate), let anchor = group.anchor, let expected = final(in: anchor) else {
+                return "Group \(group.id): cannot determine Mandarin final for candidate or plan anchor."
+            }
+            guard actual == expected else { return "Group \(group.id): ending final \(actual) must rhyme with \(anchor) (\(expected))." }
+            for number in group.lines where number != index + 1 && !pending.contains(number - 1) {
+                guard translations.indices.contains(number - 1), final(in: translations[number - 1]) == actual else {
+                    return "Group \(group.id): ending does not rhyme with fixed/completed line \(number)."
+                }
+            }
+            return nil
         }
     }
 }

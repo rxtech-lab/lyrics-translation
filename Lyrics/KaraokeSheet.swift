@@ -10,6 +10,7 @@ struct KaraokeSheet: View {
     @State private var playback = MusicPlayback.shared
     @State private var path: [Route] = []
     @AppStorage("karaokeTrack") private var track = KaraokeTrack.original
+    @AppStorage("karaokeDisplay") private var display = LyricDisplay.both
     @State private var status: String?
     @State private var error: String?
     @State private var export: SubtitleFormat?
@@ -25,7 +26,7 @@ struct KaraokeSheet: View {
                     VStack(spacing: 0) {
                         SongHeader(music: music, progress: song.timedCount(track), onAutoDetect: { detecting = true }) { path.append(.timing) }
                         Divider()
-                        KaraokeStage(song: song, track: track, playback: playback) { path.append(.timing) }
+                        KaraokeStage(song: song, track: track, display: display, playback: playback) { path.append(.timing) }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         Divider()
                         TransportBar(playback: playback, duration: music.duration ?? 0, report: report)
@@ -50,7 +51,11 @@ struct KaraokeSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Picker("Subtitle", selection: $track) { ForEach(KaraokeTrack.allCases) { Text($0.rawValue).tag($0) } }
-                        .pickerStyle(.segmented).help("Which text is shown and timed as the karaoke subtitle")
+                        .pickerStyle(.segmented).help("Which text is timed as the karaoke subtitle")
+                    Picker("Show", systemImage: "text.bubble", selection: $display) {
+                        ForEach(LyricDisplay.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.menu).help("Which lyrics appear on the karaoke stage")
                     Button("Time Words", systemImage: "metronome") { path.append(.timing) }.disabled(song.appleMusic == nil)
                     Menu("More", systemImage: "ellipsis") {
                         Button(song.appleMusic == nil ? "Choose Song…" : "Change Song…", systemImage: "magnifyingglass") { path.append(.search) }
@@ -150,16 +155,29 @@ private struct SongHeader: View {
     }
 }
 
-/// Karaoke preview: all simultaneously sung lines, their companion text, and the next cue.
+/// Karaoke preview in the style of Apple Music lyrics: the sung line sits in the upper third, the lines
+/// scroll up with a cascading spring, words fill with a soft edge, and duet partners sit on opposite sides.
+/// Lines whose timings overlap are grouped and scroll into focus together.
 private struct KaraokeStage: View {
     let song: Song
     let track: KaraokeTrack
+    let display: LyricDisplay
     let playback: MusicPlayback
     var onTime: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The line the stage is scrolled to. Only moves forward during playback, so clock jitter can't bounce it.
+    @State private var focus = 0
+    /// Each line's measured height; positions are summed from these so offsets never feed back into layout.
+    @State private var heights: [Int: CGFloat] = [:]
+    /// Each line's measured height, used to scroll within a group taller than the stage.
+    @State private var lineHeights: [Int: CGFloat] = [:]
+
+    static let spacing: CGFloat = 36
+    /// Scroll to a line slightly before it is sung, like Apple Music.
+    static let lead = 0.25
 
     var body: some View {
-        let lines = song.lines.compactMap { line in line.span(track).map { (line: line, words: line.words(track), span: $0) } }
+        let lines = song.lines.compactMap { line in line.span(track).map { (line: line, span: $0) } }
         if lines.isEmpty {
             ContentUnavailableView {
                 Label("No word timings yet", systemImage: "metronome")
@@ -169,59 +187,146 @@ private struct KaraokeStage: View {
                 Button("Time Words", action: onTime).buttonStyle(.borderedProminent)
             }
         } else {
+            let sides = speakerSides()
+            let groups = Self.groups(lines.map(\.span))
             TimelineView(.animation) { _ in
                 let time = playback.time
                 // Use each line's complete span: another singer starting must not hide it.
-                let active = lines.indices.filter {
-                    lines[$0].span.lowerBound <= time && time < lines[$0].span.upperBound
-                }
-                let upcoming = lines.indices.filter { lines[$0].span.lowerBound > time }
-                    .min { lines[$0].span.lowerBound < lines[$1].span.lowerBound }
+                let active = Set(lines.indices.filter { lines[$0].span.lowerBound <= time && time < lines[$0].span.upperBound })
+                // The most recently started group (with a small lead) is the scroll target, so lines sung
+                // together stay together in focus.
+                let target = groups.indices.last { groups[$0].span.lowerBound <= time + Self.lead } ?? 0
+                let anchor = min(focus, groups.count - 1)
                 GeometryReader { geometry in
-                    ScrollView {
-                        VStack(spacing: 28) {
-                            ForEach(active, id: \.self) { index in
-                                let item = lines[index]
-                                VStack(spacing: 16) {
-                                    if let tag = item.line.tag {
-                                        Text(tag).font(.callout.weight(.semibold)).foregroundStyle(.tint)
-                                    }
-                                    FlowLayout(alignment: .center, lineSpacing: 10) {
-                                        let ranges = TimedWord.resolve(item.words)
-                                        ForEach(Array(item.words.enumerated()), id: \.offset) { index, word in
-                                            KaraokeWord(text: word.text + (word.space ? " " : ""), progress: progress(ranges[index], time: time))
-                                        }
-                                    }
-                                    let companion = item.line.text(track.other)
-                                    if !companion.isEmpty {
-                                        Text(companion).font(.title2).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                                    }
+                    let top = geometry.size.height * 0.3
+                    let inner = innerOffset(groups[anchor].lines, spans: lines.map(\.span), time: time,
+                                            groupHeight: heights[anchor] ?? 0, room: geometry.size.height * 0.55)
+                    let y = (0..<anchor).reduce(CGFloat(0)) { $0 + (heights[$1] ?? 0) + Self.spacing } + inner
+                    VStack(alignment: .leading, spacing: Self.spacing) {
+                        ForEach(groups.indices, id: \.self) { group in
+                            // Lines that overlap in time are one block, kept in lyric order.
+                            VStack(alignment: .leading, spacing: Self.groupSpacing) {
+                                ForEach(groups[group].lines, id: \.self) { index in
+                                    let item = lines[index]
+                                    let state: LineState = active.contains(index) ? .current : item.span.upperBound <= time ? .past : .upcoming
+                                    let previousTag = index > 0 ? lines[index - 1].line.tag : nil
+                                    line(item.line, span: item.span, time: time, state: state,
+                                         side: sides[item.line.speaker ?? ""] ?? .leading, showTag: item.line.tag != previousTag)
+                                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { lineHeights[index] = $0 }
+                                        .contentShape(.rect)
+                                        .onTapGesture { playback.seek(to: max(0, item.span.lowerBound - Self.lead)) }
                                 }
-                                .transition(lineTransition)
                             }
-                            if let upcoming {
-                                Text(lines[upcoming].line.text(track))
-                                    .font(.title3).foregroundStyle(.tertiary)
-                                    .multilineTextAlignment(.center)
-                                    .id(upcoming)
-                                    .transition(lineTransition)
-                            }
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[group] = $0 }
+                            .offset(y: top - y)
+                            // Groups below the focus follow a beat later, giving the cascading scroll.
+                            .animation(scroll(delay: group - anchor), value: anchor)
+                            .animation(scroll(delay: group - anchor), value: inner)
                         }
-                        .padding(40)
-                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
-                        .animation(.easeInOut(duration: reduceMotion ? 0.15 : 0.35), value: active)
-                        .animation(.easeInOut(duration: reduceMotion ? 0.15 : 0.35), value: upcoming)
                     }
+                    .padding(.horizontal, 56)
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+                    .clipped()
+                    .mask {
+                        LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12),
+                                               .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
+                                       startPoint: .top, endPoint: .bottom)
+                    }
+                }
+                .onAppear { focus = target }
+                .onChange(of: target) { _, new in
+                    // Forward always; backward only for a real seek, not a few frames of clock correction.
+                    if new > focus || time + Self.lead < groups[min(focus, groups.count - 1)].span.lowerBound - 0.4 { focus = new }
                 }
             }
         }
     }
 
-    private var lineTransition: AnyTransition {
-        reduceMotion ? .opacity : .asymmetric(
-            insertion: .offset(y: 32).combined(with: .opacity),
-            removal: .offset(y: -32).combined(with: .opacity)
-        )
+    enum LineState { case past, current, upcoming }
+
+    /// How far to scroll into the focused group so its latest-started line stays visible when the
+    /// group is taller than the room below the focus point. Zero for groups that fit.
+    func innerOffset(_ members: [Int], spans: [ClosedRange<Double>], time: Double, groupHeight: CGFloat, room: CGFloat) -> CGFloat {
+        let excess = groupHeight - room
+        guard excess > 0 else { return 0 }
+        let started = members.indices.filter { spans[members[$0]].lowerBound <= time + Self.lead }
+        guard let latest = started.max(by: { spans[members[$0]].lowerBound < spans[members[$1]].lowerBound }) else { return 0 }
+        let before = members[..<latest].reduce(CGFloat(0)) { $0 + (lineHeights[$1] ?? 0) + Self.groupSpacing }
+        return min(before, excess)
+    }
+
+    /// Gap between lines sung at the same time, tighter than between groups.
+    static let groupSpacing: CGFloat = 14
+
+    /// Groups lines sung at the same time (e.g. two singers at once), wherever they sit in the lyrics:
+    /// lines are walked in time order and a line joins the group when it starts before the group's latest end.
+    /// Groups are in time order; the lines inside a group keep lyric order.
+    static func groups(_ spans: [ClosedRange<Double>]) -> [(lines: [Int], span: ClosedRange<Double>)] {
+        var groups: [(lines: [Int], span: ClosedRange<Double>)] = []
+        let byTime = spans.indices.sorted { (spans[$0].lowerBound, $0) < (spans[$1].lowerBound, $1) }
+        for index in byTime {
+            let span = spans[index]
+            if let last = groups.last, span.lowerBound < last.span.upperBound {
+                groups[groups.count - 1] = (last.lines + [index], last.span.lowerBound...max(last.span.upperBound, span.upperBound))
+            } else {
+                groups.append(([index], span))
+            }
+        }
+        return groups.map { ($0.lines.sorted(), $0.span) }
+    }
+
+    func scroll(delay steps: Int) -> Animation {
+        if reduceMotion { return .easeInOut(duration: 0.25) }
+        let delay = min(0.32, Double(max(0, steps + 1)) * 0.045)
+        return .spring(response: 0.7, dampingFraction: 0.9).delay(delay)
+    }
+
+    /// Alternates sides by order of first appearance: the first singer on the left, the next on the right.
+    func speakerSides() -> [String: HorizontalAlignment] {
+        var sides: [String: HorizontalAlignment] = [:]
+        for speaker in song.lines.compactMap(\.speaker) where sides[speaker] == nil {
+            sides[speaker] = sides.count.isMultiple(of: 2) ? .leading : .trailing
+        }
+        return sides
+    }
+
+    func line(_ line: LyricLine, span: ClosedRange<Double>, time: Double, state: LineState, side: HorizontalAlignment, showTag: Bool) -> some View {
+        // The large, word-highlighted text: the timed track, or the single language chosen to show.
+        let main = display.single ?? track
+        let words = line.words(main)
+        let ranges = ranges(words, fallback: span)
+        let companion = display.single == nil ? line.text(track.other) : ""
+        let alignment: Alignment = side == .trailing ? .trailing : .leading
+        let textAlignment: TextAlignment = side == .trailing ? .trailing : .leading
+        return VStack(alignment: side, spacing: 10) {
+            if showTag, let tag = line.tag {
+                Text(tag).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            FlowLayout(alignment: side, lineSpacing: 6) {
+                ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                    KaraokeWord(text: word.text + (word.space ? " " : ""), progress: progress(ranges[index], time: time))
+                }
+            }
+            if !companion.isEmpty {
+                Text(companion).font(.title2.weight(.semibold)).foregroundStyle(.secondary).multilineTextAlignment(textAlignment)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment)
+        // Sung lines dim back to the same grey as unsung text; only the current line is bright and sharp.
+        .opacity(state == .past ? 0.3 : 1)
+        .blur(radius: state == .current || reduceMotion ? 0 : 1.2)
+        .animation(.easeInOut(duration: 0.5), value: state)
+    }
+
+    /// Word ranges from the text's own timings; untimed text sweeps evenly across the line's span.
+    func ranges(_ words: [TimedWord], fallback span: ClosedRange<Double>) -> [ClosedRange<Double>?] {
+        let timed = TimedWord.resolve(words)
+        guard !words.isEmpty, timed.allSatisfy({ $0 == nil }) else { return timed }
+        let step = (span.upperBound - span.lowerBound) / Double(words.count)
+        return words.indices.map { index in
+            let start = span.lowerBound + step * Double(index)
+            return start...(start + step)
+        }
     }
 
     func progress(_ range: ClosedRange<Double>?, time: Double) -> Double {
@@ -231,17 +336,30 @@ private struct KaraokeStage: View {
     }
 }
 
-/// A word that fills with the accent colour from left to right as it is sung.
+/// A word that fills from left to right as it is sung, with a feathered edge and a slight lift.
 private struct KaraokeWord: View {
+    static let lyricFont = Font.system(size: 40, weight: .bold)
+    /// Width of the soft fill edge, as a fraction of the word.
+    static let feather = 0.35
+
     let text: String
     let progress: Double
 
     var body: some View {
-        Text(text).font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.tertiary)
-            .overlay(alignment: .leading) {
-                Text(text).font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.tint)
-                    .mask(alignment: .leading) { GeometryReader { proxy in Rectangle().frame(width: proxy.size.width * progress) } }
+        let eased = progress * progress * (3 - 2 * progress)
+        // Linear fill keeps the sweep moving at an even speed across word boundaries.
+        let edge = progress * (1 + Self.feather)
+        Text(text).font(Self.lyricFont).foregroundStyle(.primary.opacity(0.3))
+            .overlay {
+                Text(text).font(Self.lyricFont).foregroundStyle(.primary)
+                    .mask {
+                        LinearGradient(stops: [.init(color: .black, location: min(1, max(0, edge - Self.feather))),
+                                               .init(color: .clear, location: min(1, max(0, edge)))],
+                                       startPoint: .leading, endPoint: .trailing)
+                    }
+                    .opacity(progress > 0 ? 1 : 0)
             }
+            .offset(y: -2 * eased)
     }
 }
 
@@ -391,6 +509,12 @@ private struct KaraokeTimingView: View {
     /// Working copy of every line's words for the track. Key presses read and write this synchronously,
     /// so a fast press–release never reads a stale document value and drops the other half of the timing.
     @State private var draft: [[TimedWord]] = []
+    /// The track `draft` was loaded for, so pending saves land on the right text after switching tracks.
+    @State private var draftTrack = KaraokeTrack.original
+    /// Lines edited in `draft` but not yet written to the document. Writing the document re-renders the
+    /// whole studio window, so presses are batched and saved once the user pauses.
+    @State private var dirty: Set<Int> = []
+    @State private var flushTask: Task<Void, Never>?
     @State private var detecting = false
     @State private var confirmFill = false
     @AppStorage("karaoke.closeGapsWhileRecording") private var closeGapsWhileRecording = false
@@ -428,29 +552,28 @@ private struct KaraokeTimingView: View {
                 hint("return", "Play or pause")
                 Button(action: undo) { hint("delete.left", "Undo word") }
                     .buttonStyle(.plain)
-                    .disabled(holding != nil || undoTarget == nil)
+                    .disabled(undoTarget == nil)
                 hint("arrow.up", "Redo line")
-                Button { editingLine = min(cursor.line, song.lines.count - 1) } label: { hint("e.square", "Precise edit") }
+                Button { finishHold(); editingLine = min(cursor.line, song.lines.count - 1) } label: { hint("e.square", "Precise edit") }
                     .buttonStyle(.plain)
-                    .disabled(holding != nil || song.lines.isEmpty)
+                    .disabled(song.lines.isEmpty)
                     .help("Edit the current line’s timing precisely (E)")
                 Button(action: advanceLine) { hint("arrow.right", "Next line") }
                     .buttonStyle(.plain)
-                    .disabled(holding != nil || nextLine == nil)
+                    .disabled(nextLine == nil)
                     .help("Move to the next lyric line (Right Arrow)")
                 Spacer()
                 if finished { Label("All words timed", systemImage: "checkmark.seal.fill").foregroundStyle(.green) }
                 Menu {
                     Button("Detect from Recording…", systemImage: "waveform.badge.magnifyingglass") { detecting = true }
                     Button("Fill Gaps Between Timed Words…", systemImage: "arrow.left.and.right.text.vertical") { confirmFill = true }
-                        .disabled(song.timedCount(track).timed == 0)
+                        .disabled(!hasTimedWords)
                 } label: {
                     Label("Auto-Time", systemImage: "wand.and.stars")
                 } primaryAction: {
-                    detecting = true
+                    finishHold(); detecting = true
                 }
                 .menuStyle(.button).buttonStyle(.bordered).fixedSize()
-                .disabled(holding != nil)
                 .help("Click to detect timings from a recording; open the arrow to fill skipped words")
             }
             .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 10)
@@ -472,14 +595,15 @@ private struct KaraokeTimingView: View {
         .onKeyPress(.upArrow) { redoLine(); return .handled }
         .onKeyPress(.rightArrow) { advanceLine(); return .handled }
         .onKeyPress("e") {
-            guard holding == nil, !song.lines.isEmpty else { return .ignored }
+            guard !song.lines.isEmpty else { return .ignored }
+            finishHold()
             editingLine = min(cursor.line, song.lines.count - 1); return .handled
         }
         .navigationDestination(item: $editingLine) { line in
             WordTimingEditor(lineCount: song.lines.count,
                              text: { (song.lines[$0].text(track), song.lines[$0].tag) },
                              load: { words($0) },
-                             save: { commit($0, $1) },
+                             save: { commit($0, $1, immediately: true) },
                              playback: playback,
                              duration: song.appleMusic?.duration ?? 0,
                              report: report,
@@ -490,13 +614,15 @@ private struct KaraokeTimingView: View {
             AutoTimingSheet(lines: song.lines.indices.map(words), trackName: track.rawValue,
                             sampleText: song.lines.prefix(20).map { $0.text(track) }.joined(separator: "\n"),
                             appleMusicDuration: song.appleMusic?.duration, playback: playback) { lines in
+                flush()
                 song.checkpoint("Before detecting \(track.rawValue.lowercased()) timings")
                 apply(lines)
                 report("Detected timings applied")
             }
         }
         .onAppear { reloadDraft(); focused = true; cursor = firstUntimed() }
-        .onChange(of: track) { reloadDraft(); holding = nil; timingHistory = []; cursor = firstUntimed() }
+        .onDisappear { flush() }
+        .onChange(of: track) { flush(); reloadDraft(); holding = nil; timingHistory = []; cursor = firstUntimed() }
         .navigationTitle("Time Words")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -505,11 +631,12 @@ private struct KaraokeTimingView: View {
                     ForEach([0, -0.05, -0.1, -0.15, -0.2, -0.3], id: \.self) { value in Text(value == 0 ? "No offset" : "\(Int(value * 1000)) ms").tag(value) }
                 }
                 .pickerStyle(.menu).fixedSize().help("Shift each press earlier to make up for reaction time")
-                Button("Clear Timings", systemImage: "eraser", role: .destructive) { confirmClear = true }.disabled(song.timedCount(track).timed == 0)
+                Button("Clear Timings", systemImage: "eraser", role: .destructive) { confirmClear = true }.disabled(!hasTimedWords)
             }
         }
         .confirmationDialog("Clear all \(track.rawValue.lowercased()) word timings?", isPresented: $confirmClear) {
             Button("Clear Timings", role: .destructive) {
+                flush()
                 song.checkpoint("Before clearing \(track.rawValue.lowercased()) timings")
                 for index in song.lines.indices { song.lines[index].setWords(TimedWord.split(song.lines[index].text(track)), track) }
                 reloadDraft()
@@ -518,6 +645,7 @@ private struct KaraokeTimingView: View {
         } message: { Text("A copy is saved in Versions so you can restore it.") }
         .confirmationDialog("Fill untimed words between the words you’ve timed?", isPresented: $confirmFill) {
             Button("Fill Gaps") {
+                flush()
                 song.checkpoint("Before filling \(track.rawValue.lowercased()) timing gaps")
                 let before = song.timedCount(track).timed
                 apply(AutoTiming.interpolate(song.lines.indices.map(words)))
@@ -528,6 +656,7 @@ private struct KaraokeTimingView: View {
 
     /// Replaces every line's words for the track, e.g. after automatic timing.
     func apply(_ lines: [[TimedWord]]) {
+        flush()
         for index in song.lines.indices where lines.indices.contains(index) { song.lines[index].setWords(lines[index], track) }
         reloadDraft()
         holding = nil; timingHistory = []; cursor = firstUntimed()
@@ -542,48 +671,14 @@ private struct KaraokeTimingView: View {
 
     func row(_ index: Int) -> some View {
         let line = song.lines[index]
-        let words = words(index)
-        let active = index == cursor.line
-        return HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("\(index + 1)").monospacedDigit().foregroundStyle(.tertiary).frame(width: 28, alignment: .trailing)
-            VStack(alignment: .leading, spacing: 6) {
-                if let tag = line.tag { Text(tag).font(.caption.weight(.semibold)).foregroundStyle(.tint) }
-                FlowLayout(spacing: 4, lineSpacing: 4) {
-                    ForEach(Array(words.enumerated()), id: \.offset) { position, word in
-                        chip(word, at: Cursor(line: index, word: position))
-                    }
-                }
-                let companion = line.text(track.other)
-                if !companion.isEmpty { Text(companion).font(.callout).foregroundStyle(.secondary) }
-            }
-            Spacer(minLength: 0)
-            if let start = TimedWord.resolve(words).compactMap({ $0?.lowerBound }).min() { Text(KaraokeClock.display(start)).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
-            if words.contains(where: \.isTimed) {
-                Button("Play Line", systemImage: "play.circle.fill") {
-                    Task { do { try await playback.playLine(words) } catch { report("!" + error.localizedDescription) } }
-                }
-                .labelStyle(.iconOnly).buttonStyle(.borderless)
-                .disabled(holding != nil || playback.loading)
-                .help("Play this line’s timed words")
-            }
-            Button("Edit Precisely", systemImage: "slider.horizontal.below.rectangle") { editingLine = index }
-                .labelStyle(.iconOnly).buttonStyle(.borderless).disabled(words.isEmpty || holding != nil)
-                .help("Edit this line’s word timing precisely")
-        }
-        .padding(10)
-        .background(active ? AnyShapeStyle(.tint.opacity(0.08)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 10))
-    }
-
-    func chip(_ word: TimedWord, at position: Cursor) -> some View {
-        let isCursor = position == cursor, isHolding = position == holding
-        return Text(word.text)
-            .font(.title3.weight(isCursor ? .semibold : .regular))
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .foregroundStyle(isHolding ? AnyShapeStyle(.white) : word.isTimed ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-            .background(isHolding ? AnyShapeStyle(.tint) : word.isTimed ? AnyShapeStyle(.tint.opacity(0.15)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 6))
-            .overlay { if isCursor && !isHolding { RoundedRectangle(cornerRadius: 6).strokeBorder(.tint, lineWidth: 1.5) } }
-            .help(word.isTimed ? "\(word.start.map(KaraokeClock.display) ?? "…") – \(word.end.map(KaraokeClock.display) ?? "…")" : "Not timed")
-            .onTapGesture { jump(to: position) }
+        return TimingRow(number: index + 1, tag: line.tag, words: words(index), companion: line.text(track.other),
+                         cursorWord: cursor.line == index ? cursor.word : nil,
+                         holdingWord: holding?.line == index ? holding?.word : nil,
+                         loading: playback.loading,
+                         onJump: { jump(to: Cursor(line: index, word: $0)) },
+                         onPlay: { words in Task { do { try await playback.playLine(words) } catch { report("!" + error.localizedDescription) } } },
+                         onEdit: { finishHold(); editingLine = index })
+            .equatable()
     }
 
     // MARK: Actions
@@ -595,13 +690,46 @@ private struct KaraokeTimingView: View {
         return song.lines.indices.contains(line) ? song.lines[line].words(track) : []
     }
 
-    func reloadDraft() { draft = song.lines.map { $0.words(track) } }
+    /// Reloads the working copy from the document, discarding unsaved edits (call `flush()` first to keep them).
+    func reloadDraft() {
+        flushTask?.cancel(); flushTask = nil
+        dirty = []
+        draftTrack = track
+        draft = song.lines.map { $0.words(track) }
+    }
 
-    /// Saves one line's words to the working copy and the document.
-    func commit(_ line: Int, _ words: [TimedWord]) {
-        if draft.count != song.lines.count { reloadDraft() }
+    /// Whether any word of the track is timed, read from the working copy so it never lags behind presses.
+    var hasTimedWords: Bool { draft.contains { $0.contains(where: \.isTimed) } }
+
+    /// Saves one line's words to the working copy, and to the document after a short pause in editing.
+    func commit(_ line: Int, _ words: [TimedWord], immediately: Bool = false) {
+        if draft.count != song.lines.count { flush(); reloadDraft() }
+        guard draft.indices.contains(line) else { return }
         draft[line] = words
-        song.lines[line].setWords(words, track)
+        dirty.insert(line)
+        if immediately { flush() } else { scheduleFlush() }
+    }
+
+    func scheduleFlush() {
+        flushTask?.cancel()
+        flushTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            // Never interrupt a held word; try again once it is released.
+            if holding != nil { scheduleFlush() } else { flush() }
+        }
+    }
+
+    /// Writes every pending line to the document in a single change.
+    func flush() {
+        flushTask?.cancel(); flushTask = nil
+        guard !dirty.isEmpty else { return }
+        var lines = song.lines
+        for index in dirty where lines.indices.contains(index) && draft.indices.contains(index) {
+            lines[index].setWords(draft[index], draftTrack)
+        }
+        dirty = []
+        song.lines = lines
     }
 
     func update(_ position: Cursor, _ change: (inout TimedWord) -> Void) {
@@ -643,14 +771,13 @@ private struct KaraokeTimingView: View {
         // Keep the completed line selected until the user explicitly advances.
         cursor = Cursor(line: held.line, word: held.word + 1)
         if cursor.word == words(held.line).count {
-            if nextLine == nil {
-                cursor = Cursor(line: song.lines.count, word: 0)
-            } else {
-                report("Line complete · Press → for the next line")
-            }
+            if nextLine == nil { cursor = Cursor(line: song.lines.count, word: 0) }
         }
         if finished { playback.pause(); report("All \(track.rawValue.lowercased()) words timed") }
     }
+
+    /// Closes a word that is still held, so buttons and shortcuts work mid-press.
+    func finishHold() { if holding != nil { release() } }
 
     var nextLine: Int? {
         guard !finished else { return nil }
@@ -658,7 +785,8 @@ private struct KaraokeTimingView: View {
     }
 
     func advanceLine() {
-        guard holding == nil, let line = nextLine else { return }
+        finishHold()
+        guard let line = nextLine else { return }
         cursor = Cursor(line: line, word: 0)
         focused = true
     }
@@ -698,7 +826,8 @@ private struct KaraokeTimingView: View {
 
     /// Clears the last timed word and rewinds a little before it so it can be timed again.
     func undo() {
-        guard holding == nil, let target = undoTarget else { return }
+        finishHold()
+        guard let target = undoTarget else { return }
         timingHistory.removeAll { $0 == target }
         let word = words(target.line)[target.word]
         let start = word.start ?? word.end
@@ -711,7 +840,7 @@ private struct KaraokeTimingView: View {
 
     /// Clears the current line (or the previous one if no word of the current line is timed yet) and rewinds to just before it.
     func redoLine() {
-        guard holding == nil else { return }
+        finishHold()
         var line = min(cursor.line, song.lines.count - 1)
         if cursor.word == 0, let previous = previous(before: cursor) { line = previous.line }
         guard line >= 0 else { return }
@@ -723,10 +852,71 @@ private struct KaraokeTimingView: View {
     }
 
     func jump(to position: Cursor) {
-        guard holding == nil else { return }
+        finishHold()
         cursor = position
         let word = words(position.line)[position.word]
         if let start = word.start ?? word.end { playback.seek(to: start - offset - 2) }
         focused = true
+    }
+}
+
+/// One lyric line in the timing list. Equatable on its data so a key press only redraws the rows it changes.
+private struct TimingRow: View, @MainActor Equatable {
+    let number: Int
+    let tag: String?
+    let words: [TimedWord]
+    let companion: String
+    /// Index of the word under the cursor, when the cursor is on this line.
+    let cursorWord: Int?
+    /// Index of the word being held, when it is on this line.
+    let holdingWord: Int?
+    let loading: Bool
+    var onJump: (Int) -> Void
+    var onPlay: ([TimedWord]) -> Void
+    var onEdit: () -> Void
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.number == b.number && a.tag == b.tag && a.words == b.words && a.companion == b.companion
+            && a.cursorWord == b.cursorWord && a.holdingWord == b.holdingWord && a.loading == b.loading
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("\(number)").monospacedDigit().foregroundStyle(.tertiary).frame(width: 28, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 6) {
+                if let tag { Text(tag).font(.caption.weight(.semibold)).foregroundStyle(.tint) }
+                FlowLayout(spacing: 4, lineSpacing: 4) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { position, word in chip(word, at: position) }
+                }
+                if !companion.isEmpty { Text(companion).font(.callout).foregroundStyle(.secondary) }
+            }
+            Spacer(minLength: 0)
+            if let start = TimedWord.resolve(words).compactMap({ $0?.lowerBound }).min() {
+                Text(KaraokeClock.display(start)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            }
+            if words.contains(where: \.isTimed) {
+                Button("Play Line", systemImage: "play.circle.fill") { onPlay(words) }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless)
+                    .disabled(loading)
+                    .help("Play this line’s timed words")
+            }
+            Button("Edit Precisely", systemImage: "slider.horizontal.below.rectangle", action: onEdit)
+                .labelStyle(.iconOnly).buttonStyle(.borderless).disabled(words.isEmpty)
+                .help("Edit this line’s word timing precisely")
+        }
+        .padding(10)
+        .background(cursorWord != nil ? AnyShapeStyle(.tint.opacity(0.08)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 10))
+    }
+
+    func chip(_ word: TimedWord, at position: Int) -> some View {
+        let isCursor = position == cursorWord, isHolding = position == holdingWord
+        return Text(word.text)
+            .font(.title3.weight(isCursor ? .semibold : .regular))
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .foregroundStyle(isHolding ? AnyShapeStyle(.white) : word.isTimed ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+            .background(isHolding ? AnyShapeStyle(.tint) : word.isTimed ? AnyShapeStyle(.tint.opacity(0.15)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 6))
+            .overlay { if isCursor && !isHolding { RoundedRectangle(cornerRadius: 6).strokeBorder(.tint, lineWidth: 1.5) } }
+            .help(word.isTimed ? "\(word.start.map(KaraokeClock.display) ?? "…") – \(word.end.map(KaraokeClock.display) ?? "…")" : "Not timed")
+            .onTapGesture { onJump(position) }
     }
 }

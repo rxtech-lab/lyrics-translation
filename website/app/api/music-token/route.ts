@@ -1,0 +1,1 @@
+export async function GET(){if(!process.env.APPLE_MUSIC_DEVELOPER_TOKEN)return new Response('Not configured',{status:503});return Response.json({token:process.env.APPLE_MUSIC_DEVELOPER_TOKEN},{headers:{'Cache-Control':'no-store'}})}

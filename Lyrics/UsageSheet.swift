@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 /// Token usage and live AI Gateway cost, per agent, per session and per call.
 /// Costs are computed on a background task and cached in the document, so reopening is instant
@@ -10,6 +12,10 @@ struct UsageSheet: View {
     @State private var computing = false
     @State private var sessionID: UUID?
     @State private var mode = Mode.agents
+    @State private var exporting = false
+    @State private var preparing = false
+    @State private var saved = false
+    @State private var exportError: String?
     private let pricing = GatewayPricing.shared
 
     enum Mode: String, CaseIterable, Identifiable { case agents = "Agents", sessions = "Sessions", calls = "Calls"; var id: Self { self } }
@@ -50,6 +56,10 @@ struct UsageSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Usage & Cost")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Export PNG…", systemImage: "square.and.arrow.up") { exporting = true }
+                        .disabled(song.usage.isEmpty)
+                }
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
                     Picker("Session", selection: $sessionID) {
@@ -64,6 +74,7 @@ struct UsageSheet: View {
             }
         }
         .frame(minWidth: 860, idealWidth: 920, maxWidth: .infinity, minHeight: 640, idealHeight: 720, maxHeight: .infinity)
+        .sheet(isPresented: $exporting) { exportSheet }
         .task { await pricing.loadIfNeeded() }
         .task(id: PricingKey(signature: pricing.table.signature, records: song.usage.reduce(0) { $0 + $1.records.count })) { await updateStats() }
         .onChange(of: song.usage.map(\.id)) { _, ids in if let sessionID, !ids.contains(sessionID) { self.sessionID = nil } }
@@ -110,10 +121,10 @@ struct UsageSheet: View {
         let total = total
         return HStack(spacing: 12) {
             tile("Total cost", cost(total), systemImage: "dollarsign.circle")
-            tile("Input tokens", total.input.formatted(), systemImage: "arrow.down.doc")
-            tile("Cached tokens", (total.cacheRead + total.cacheWrite).formatted(), systemImage: "memorychip")
-            tile("Output tokens", total.output.formatted(), systemImage: "arrow.up.doc")
-            tile("Agent calls", total.calls.formatted(), systemImage: "person.3")
+            tile("Input tokens", compact(total.input), systemImage: "arrow.down.doc")
+            tile("Cached tokens", compact(total.cacheRead + total.cacheWrite), systemImage: "memorychip")
+            tile("Output tokens", compact(total.output), systemImage: "arrow.up.doc")
+            tile("Agent calls", compact(total.calls), systemImage: "person.3")
         }
     }
 
@@ -156,11 +167,11 @@ struct UsageSheet: View {
                     Text(row.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }.width(min: 220, ideal: 300)
-            TableColumn("Calls") { Text($0.calls.formatted()).monospacedDigit() }.width(50)
-            TableColumn("Input") { Text($0.input.formatted()).monospacedDigit() }.width(min: 70, ideal: 90)
-            TableColumn("Cache read") { Text($0.cacheRead.formatted()).monospacedDigit() }.width(min: 70, ideal: 90)
-            TableColumn("Cache write") { Text($0.cacheWrite.formatted()).monospacedDigit() }.width(min: 70, ideal: 90)
-            TableColumn("Output") { Text($0.output.formatted()).monospacedDigit() }.width(min: 70, ideal: 90)
+            TableColumn("Calls") { Text(compact($0.calls)).monospacedDigit().help($0.calls.formatted()) }.width(50)
+            TableColumn("Input") { Text(compact($0.input)).monospacedDigit().help($0.input.formatted()) }.width(min: 70, ideal: 90)
+            TableColumn("Cache read") { Text(compact($0.cacheRead)).monospacedDigit().help($0.cacheRead.formatted()) }.width(min: 70, ideal: 90)
+            TableColumn("Cache write") { Text(compact($0.cacheWrite)).monospacedDigit().help($0.cacheWrite.formatted()) }.width(min: 70, ideal: 90)
+            TableColumn("Output") { Text(compact($0.output)).monospacedDigit().help($0.output.formatted()) }.width(min: 70, ideal: 90)
             TableColumn("Cost (USD)") { row in
                 Text(cost(row)).monospacedDigit().foregroundStyle(row.unpriced + row.pending == row.calls ? .secondary : .primary)
                     .help(row.unpriced > 0 ? "\(row.unpriced) call\(row.unpriced == 1 ? "" : "s") without an AI Gateway price are excluded." : "")
@@ -187,6 +198,123 @@ struct UsageSheet: View {
                 Label("\(unpriced) call\(unpriced == 1 ? "" : "s") not priced (model unknown to AI Gateway)", systemImage: "questionmark.circle")
             }
         }.font(.caption).foregroundStyle(.secondary)
+    }
+
+    // MARK: PNG export
+
+    private var exportSheet: some View {
+        NavigationStack {
+            ScrollView([.horizontal, .vertical]) {
+                exportArtwork.padding(20)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle("Export Usage")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { exporting = false } }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu("Export PNG", systemImage: "square.and.arrow.up") {
+                        Button("Save PNG…", systemImage: "square.and.arrow.down") { exportPNG(saveToDisk: true) }
+                        Button("Share PNG…", systemImage: "square.and.arrow.up") { exportPNG(saveToDisk: false) }
+                    }
+                }
+            }
+            .disabled(preparing)
+            .overlay {
+                if preparing { ProgressView("Preparing PNG…").padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)) }
+                if saved {
+                    Label("PNG saved", systemImage: "checkmark.circle.fill")
+                        .padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .task { try? await Task.sleep(for: .seconds(2)); saved = false }
+                }
+            }
+            .alert("Unable to export", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+                Button("OK") {}
+            } message: { Text(exportError ?? "") }
+        }
+        .frame(minWidth: 900, minHeight: 640)
+    }
+
+    private var exportArtwork: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Usage & Cost").font(.largeTitle.bold())
+            Text("\(sessionID.flatMap { id in sessions.first { $0.id == id }?.title } ?? "All sessions") · \(mode.rawValue)")
+                .foregroundStyle(.secondary)
+            summary
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
+                GridRow {
+                    ForEach([mode.rawValue, "Calls", "Input", "Cache read", "Cache write", "Output", "Cost (USD)"], id: \.self) {
+                        Text($0).font(.caption.bold()).foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(rows) { row in
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(row.title).fontWeight(.semibold)
+                            Text(row.detail).font(.caption).foregroundStyle(.secondary)
+                        }.frame(width: 270, alignment: .leading)
+                        Text(compact(row.calls))
+                        Text(compact(row.input))
+                        Text(compact(row.cacheRead))
+                        Text(compact(row.cacheWrite))
+                        Text(compact(row.output))
+                        Text(cost(row))
+                    }
+                    Divider()
+                }
+            }.monospacedDigit()
+            Text("Estimated USD costs · Vercel AI Gateway prices. Unpriced calls excluded; pending costs may be incomplete.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(32).frame(width: 1100, alignment: .leading)
+        .background(Color(red: 0.06, green: 0.09, blue: 0.16))
+        .environment(\.colorScheme, .dark)
+    }
+
+    @MainActor
+    private func exportPNG(saveToDisk: Bool) {
+        preparing = true
+        saved = false
+        Task { @MainActor in
+            defer { preparing = false }
+            await Task.yield()
+            let renderer = ImageRenderer(content: exportArtwork)
+            renderer.scale = 2
+            guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff),
+                  let data = bitmap.representation(using: .png, properties: [:]) else {
+                exportError = "Could not render usage. Try selecting a smaller session."
+                return
+            }
+            guard let window = NSApp.keyWindow else { exportError = "No export window is available."; return }
+            if saveToDisk {
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.png]
+                panel.canCreateDirectories = true
+                panel.nameFieldStringValue = "Usage-\(mode.rawValue).png"
+                panel.beginSheetModal(for: window) { response in
+                    guard response == .OK, let url = panel.url else { return }
+                    do { try data.write(to: url, options: .atomic); saved = true }
+                    catch { exportError = error.localizedDescription }
+                }
+            } else {
+                do {
+                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("Usage-\(UUID().uuidString).png")
+                    try data.write(to: url, options: .atomic)
+                    guard let view = window.contentView else { exportError = "No sharing view is available."; return }
+                    NSSharingServicePicker(items: [url]).show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+                } catch { exportError = error.localizedDescription }
+            }
+        }
+    }
+
+    private func compact(_ value: Int) -> String {
+        let number = Double(value)
+        for (scale, suffix) in [(1_000_000_000.0, "B"), (1_000_000.0, "M"), (1_000.0, "K")] {
+            if number >= scale {
+                return (number / scale).formatted(.number.precision(.fractionLength(0...2))) + suffix
+            }
+        }
+        return value.formatted()
     }
 
     // MARK: Helpers
