@@ -1,0 +1,32 @@
+{
+  "fill" : {
+    "solid" : "extended-srgb:0.06000,0.01500,0.24000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "musical-note.png",
+          "name" : "Pearl musical note"
+        },
+        {
+          "glass" : false,
+          "image-name" : "lyric-ribbons.png",
+          "name" : "Lyric ribbons"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.3
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}
