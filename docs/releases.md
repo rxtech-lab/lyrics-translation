@@ -1,0 +1,64 @@
+# LyricStudio releases
+
+The Git remote is `https://github.com/rxtech-lab/lyrics-translation.git`.
+
+- **Create Release** previews the next version on pushes to `main`. Manually dispatch it on `main` to have semantic-release analyze commits since the last release, select the version, generate release notes, and create a `vX.Y.Z` tag and publish the GitHub release immediately. No version input is needed. It explicitly dispatches macOS Release at the new tag (GitHub's built-in token cannot trigger another push workflow). Other branches cannot publish through this workflow.
+- **macOS Release** also runs for independently pushed `v*` tags. Only stable semantic versions are accepted. It archives a universal Mac app, signs Sparkle helpers, notarizes/staples the app and DMG, validates the Ed25519 feed signature, uploads the DMG to the GitHub release, and deploys the update site.
+
+XcodeGen (`project.yml`) is the source of truth for the Xcode project. Use `xcodegen generate --spec project.yml` after changes. Sparkle is filtered to macOS. Debug/local builds without a public key do not start the updater.
+
+## Commit-driven versions
+
+The root `.releaserc` configures commit analysis, release notes, and published GitHub releases. Use conventional commit messages:
+
+- `fix: correct PDF import` produces a patch release.
+- `feat: add scanner discovery` produces a minor release.
+- A `BREAKING CHANGE:` footer produces a major release.
+- `docs:`, `chore:`, and `ci:` alone do not produce a release.
+
+The highest applicable change determines the next version. Without an existing release tag, semantic-release starts at `1.0.0`; the unreleased `0.1.0` in project/package metadata does not establish a release baseline. If there are no releasable commits, no tag, release, or distribution run is created.
+
+The macOS workflow stamps `MARKETING_VERSION` from the selected tag and uses its run number for `CURRENT_PROJECT_VERSION`. The GitHub release and notes are visible immediately; the DMG is attached after signing, notarization, and feed verification. Downloads become available when that build completes. Version bumps are not committed back to the source tree. If distribution fails after publishing the release, rerun the failed macOS Release run, or manually dispatch macOS Release at that existing tag.
+
+This flow uses the built-in `GITHUB_TOKEN` with contents/actions write permissions; `RELEASE_TOKEN` is not required. Issue and pull-request release comments are disabled.
+
+## GitHub configuration
+
+Set these repository or organization Actions secrets with access to `rxtech-lab/lyrics-translation`:
+
+| Secret | Value |
+| --- | --- |
+| `BUILD_CERTIFICATE_BASE64` | Base64 Developer ID Application signing certificate, exported as P12 with its private key |
+| `P12_PASSWORD` | P12 export password |
+| `SIGNING_CERTIFICATE_NAME` | Full Developer ID Application identity name |
+| `APPLE_ID` | Apple account for notarization |
+| `APPLE_ID_PWD` | App-specific notarization password |
+| `APPLE_TEAM_ID` | Apple Developer team ID (`T7GYB573Y6` for this project) |
+| `SPARKLE_KEY` | Base64 Sparkle Ed25519 signing seed; keep stable across releases |
+
+The release build derives `SPARKLE_PUBLIC_KEY` from the existing `SPARKLE_KEY` signing secret and embeds it in Info.plist. An optional Actions variable (or secret) named `SPARKLE_PUBLIC_KEY` is checked against that key; a mismatch fails the build. To export just the public key, manually dispatch macOS Release with `resolve_public_key_only` enabled, then download the `sparkle-public-key` artifact and save its contents as the repository variable. This mode does not build or publish a release. Feed validation also checks the archive signature against the embedded public key. Keep a secure backup of the private key. Never replace it casually after distributing an app.
+
+No provisioning profile is needed for the current Developer ID app's sandbox, network, USB, and user-selected file entitlements. Additional restricted capabilities may change that.
+
+## Update hosting
+
+Cloudflare (rxlab.app zone): DNS-only CNAME `update.lyrics` → `rxtech-lab.github.io`.
+GitHub Settings → Pages: source **GitHub Actions**, custom domain **update.lyrics.rxlab.app**, enforce HTTPS once GitHub issues the certificate. Allow version tags in the `github-pages` environment deployment rules.
+
+The repository is private, so its release assets are not anonymous downloads. Pages intentionally hosts the notarized DMG at `https://update.lyrics.rxlab.app/vX.Y.Z/LyricStudio.dmg` alongside `appcast.xml` and release notes. Only generated `output/pages` is deployed; source code is excluded. Each deployment contains the current release only. Public downloads require public Pages access and must fit GitHub Pages size limits.
+
+Commit and push the workflows before using Actions. Configure signing secrets before creating the first tag. The app's first signed release is a manual download; future versions use Sparkle's native update UI and the **Check for Updates…** app-menu command.
+
+## Validation
+
+Local builds: `xcodebuild -project LyricStudio.xcodeproj -scheme LyricStudio -configuration Release -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO build` (use `generic/platform=iOS Simulator` for iOS).
+
+Feed tests: install Python `cryptography` and run `python3 scripts/ci/test_validate_appcast.py`. Tests cover a valid signature, tampered archive, wrong signing key, and incorrect download URL. Release generation also requires Python `markdown`.
+
+## Lyrics-specific setup
+
+Set `DEPENDENCIES_TOKEN` to a token with read access to rxtech-lab/RxAgentSDK and rxtech-lab/film-workflow. CI checks these out under dependencies and rewrites only the CI copy of project.yml. Use an Xcode toolchain supporting Swift 6.3. The app uses associated domains; configure Developer ID provisioning for that capability if required by signing.
+
+The website download points to https://update.lyrics.rxlab.app/LyricStudio.dmg, populated with each successful release. It is unavailable until the first release deploys.
+
+GitHub Pages source and custom domain have been configured. DNS and signing secrets still need provisioning. No release has been published.

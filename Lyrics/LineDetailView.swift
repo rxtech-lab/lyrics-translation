@@ -17,22 +17,28 @@ struct LineDetailView: View {
     var onSelectLine: (Int) -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                lyricCard
-                actions
-                HStack(alignment: .top, spacing: 16) {
-                    meterCard
-                    rhymeCard
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    lyricCard
+                    actions
+                    let cardLayout = geometry.size.width >= 820
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                    cardLayout {
+                        meterCard
+                        rhymeCard
+                    }
+                    if !line.review.isEmpty { reviewCard }
                 }
-                if !line.review.isEmpty { reviewCard }
+                .padding(.horizontal, 40).padding(.vertical, 32)
+                .frame(width: min(900, geometry.size.width), alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 40).padding(.vertical, 32)
-            .frame(maxWidth: 900, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .scrollContentBackground(.hidden)
         }
-        .scrollContentBackground(.hidden)
+
         .alert("Apple Music", isPresented: Binding(get: { playbackError != nil }, set: { if !$0 { playbackError = nil } })) {
             Button("OK") { playbackError = nil }
         } message: { Text(playbackError ?? "") }
@@ -146,20 +152,23 @@ struct LineDetailView: View {
             if line.stress.isEmpty {
                 Text("Translate the line to analyze its rhythm.").font(.callout).foregroundStyle(.secondary)
             } else {
-                HStack(alignment: .bottom, spacing: 8) {
-                    ForEach(Array(line.stress.enumerated()), id: \.offset) { index, beat in
-                        let stressed = beat == "1"
-                        VStack(spacing: 6) {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(stressed ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
-                                .frame(width: 18, height: stressed ? 44 : 20)
-                            Text("\(index + 1)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                ScrollView(.horizontal) {
+                    HStack(alignment: .bottom, spacing: 8) {
+                        ForEach(Array(line.stress.enumerated()), id: \.offset) { index, beat in
+                            let stressed = beat == "1"
+                            VStack(spacing: 6) {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(stressed ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                                    .frame(width: 18, height: stressed ? 44 : 20)
+                                Text("\(index + 1)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .frame(height: 64, alignment: .bottom)
+                    .accessibilityElement()
+                    .accessibilityLabel("Stress pattern \(line.stress)")
                 }
-                .frame(height: 64, alignment: .bottom)
-                .accessibilityElement()
-                .accessibilityLabel("Stress pattern \(line.stress)")
+                .frame(height: 80)
                 HStack(spacing: 14) {
                     Legend(style: AnyShapeStyle(.tint), title: "Stressed")
                     Legend(style: AnyShapeStyle(.quaternary), title: "Unstressed")

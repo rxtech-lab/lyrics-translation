@@ -345,6 +345,12 @@ private struct ActivityContent: View {
                                 Divider()
                                 if entry.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                     Text(running ? "Waiting for response…" : "No response text.").foregroundStyle(.secondary)
+                                } else if let object = activityObject(entry.body) {
+                                    ActivityFields(value: object)
+                                } else if running && entry.id == entries.last?.id &&
+                                            (entry.body.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") ||
+                                             entry.body.contains("```json")) {
+                                    Text("Receiving structured response…").foregroundStyle(.secondary)
                                 } else {
                                     MarkdownView(text: entry.body, style: MarkdownStyle(bodyFontSize: 15, lineSpacing: 5, blockSpacing: 14))
                                         .textSelection(.enabled)
@@ -376,5 +382,65 @@ private struct ActivityContent: View {
                 .padding(20)
             }
         }
+    }
+}
+
+/// Preserve nested agent evidence as readable fields instead of exposing its wire format.
+private func activityObject(_ text: String) -> [String: Any]? {
+    for candidate in LenientJSON.objects(in: text) {
+        let cleaned = candidate.replacingOccurrences(of: #",\s*([}\]])"#, with: "$1", options: .regularExpression)
+        if let object = try? JSONSerialization.jsonObject(with: Data(cleaned.utf8)) as? [String: Any] {
+            return object
+        }
+    }
+    return nil
+}
+
+private struct ActivityFields: View {
+    let value: Any
+
+    private func title(_ key: String) -> String {
+        key.replacingOccurrences(of: #"([a-z])([A-Z])"#, with: "$1 $2", options: .regularExpression).capitalized
+    }
+
+    var body: some View {
+        content.textSelection(.enabled)
+    }
+
+    private var content: AnyView {
+        if let object = value as? [String: Any] {
+            let order = ["passes", "corrections", "syllables", "stress", "groups", "rhymes", "checks"]
+            let keys = object.keys.sorted {
+                let a = order.firstIndex(of: $0) ?? order.count
+                let b = order.firstIndex(of: $1) ?? order.count
+                return a == b ? $0 < $1 : a < b
+            }
+            return AnyView(VStack(alignment: .leading, spacing: 12) {
+                ForEach(keys, id: \.self) { key in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(title(key)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        ActivityFields(value: object[key]!)
+                    }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading))
+        }
+        if let items = value as? [Any] {
+            return AnyView(VStack(alignment: .leading, spacing: 12) {
+                if items.isEmpty { Text("None").foregroundStyle(.secondary) }
+                ForEach(items.indices, id: \.self) { index in
+                    ActivityFields(value: items[index])
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                }
+            })
+        }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return AnyView(Label(number.boolValue ? "Passed" : "Needs attention",
+                                 systemImage: number.boolValue ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(number.boolValue ? Color.green : Color.orange))
+        }
+        return AnyView(Text(value is NSNull ? "None" : String(describing: value))
+            .fixedSize(horizontal: false, vertical: true))
     }
 }

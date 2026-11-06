@@ -54,6 +54,12 @@
 	<string>Lyric Studio listens to your copy of the recording on this Mac to detect when each lyric word is sung.</string>
 	<key>RxAuthClientID</key>
 	<string>$(RXAUTH_CLIENT_ID)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://update.lyrics.rxlab.app/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>$(SPARKLE_PUBLIC_KEY)</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
