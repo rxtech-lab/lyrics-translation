@@ -49,6 +49,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: app.rxlab.LyricStudio
         CODE_SIGN_ENTITLEMENTS: Lyrics/App.entitlements
+        # Empty locally (Automatic signing); CI passes the Developer ID profile name.
+        PROVISIONING_PROFILE_SPECIFIER: $(LYRICSTUDIO_PROVISIONING_PROFILE)
         RXAUTH_CLIENT_ID: client_366ef1a6f5d248df941dc9e02947f0cc
       configs:
         Debug:
