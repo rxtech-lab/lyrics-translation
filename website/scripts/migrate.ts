@@ -1,4 +1,5 @@
 import usageSummary from '../migrations/004-usage-summary';
+import songAlbumIndexes from '../migrations/005-song-album-indexes';
 import { createClient } from '@libsql/client';
 import { createHash } from 'node:crypto';
 import authors from '../migrations/003-authors';
@@ -14,7 +15,7 @@ try {
   await client.execute(`CREATE TABLE IF NOT EXISTS schema_migrations (
     id TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`);
-  for (const migration of [initial, publications, authors, usageSummary]) {
+  for (const migration of [initial, publications, authors, usageSummary, songAlbumIndexes]) {
     const checksum = createHash('sha256').update(JSON.stringify(migration.statements)).digest('hex');
     const tx = await client.transaction('write');
     try {

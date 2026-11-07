@@ -23,6 +23,8 @@ struct StudioView: View {
     @State private var translatingIDs: Set<UUID>?
     /// Line shown in the Split Line sheet.
     @State private var splittingID: UUID?
+    /// Line shown in the Edit Translation sheet.
+    @State private var editingTranslationID: UUID?
     @State private var showingJobs = false
     @State private var showingUsage = false
     @State private var karaoke = false
@@ -105,6 +107,7 @@ struct StudioView: View {
                     if ids.count > 1 {
                         Button("Merge \(ids.count) Lines", systemImage: "arrow.triangle.merge") { merge(ids) }.disabled(pipeline.running)
                     } else if let id = ids.first {
+                        Button("Edit Translation…", systemImage: "pencil") { editingTranslationID = id }.disabled(pipeline.running)
                         Button("Split Line…", systemImage: "arrow.triangle.branch") { splittingID = id }.disabled(pipeline.running)
                     }
                     Divider()
@@ -132,6 +135,8 @@ struct StudioView: View {
                         pipeline.start(song: $document.song, only: line.id)
                     } onTranslateWithInstructions: {
                         translatingIDs = [line.id]
+                    } onEditTranslation: {
+                        editingTranslationID = line.id
                     } onDeleteTranslation: {
                         pendingClear = [line.id]
                     } onSelectLine: { number in
@@ -279,6 +284,13 @@ struct StudioView: View {
                 }
             }
         }
+        .sheet(isPresented: Binding(get: { editingTranslationID != nil }, set: { if !$0 { editingTranslationID = nil } })) {
+            if let id = editingTranslationID, let index = document.song.lines.firstIndex(where: { $0.id == id }) {
+                EditTranslationSheet(line: document.song.lines[index], number: index + 1) { translation, approve in
+                    saveTranslation(id, translation: translation, approve: approve)
+                }
+            }
+        }
         .sheet(isPresented: $showingJobs) { TranslationJobsSheet(song: $document.song, pipeline: pipeline) }
         .sheet(isPresented: $sharing) { ShareLyricsSheet(song: $document.song, title: title, initialLineIDs: shareLineIDs) }
         .sheet(isPresented: $showingUsage) { UsageSheet(song: $document.song) }
@@ -322,6 +334,14 @@ struct StudioView: View {
     }
     func translatedIDs(in ids: Set<UUID>) -> Set<UUID> {
         Set(document.song.lines.filter { ids.contains($0.id) && !$0.translated.isEmpty }.map(\.id))
+    }
+    func saveTranslation(_ id: UUID, translation: String, approve: Bool) {
+        guard let index = document.song.lines.firstIndex(where: { $0.id == id }) else { return }
+        document.song.checkpoint("Before editing translation of line \(index + 1)")
+        if document.song.lines[index].translated != translation { document.song.lines[index].translationTiming = nil }
+        document.song.lines[index].translated = translation
+        document.song.lines[index].approved = approve && !translation.isEmpty
+        pipeline.status = "Translation of line \(index + 1) saved"
     }
     func saveReview(approve: Bool) {
         guard let index = document.song.lines.firstIndex(where: { selection.contains($0.id) }) else { return }
