@@ -48,12 +48,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: rxtech-lab/RxAgentSDK
-          token: ${{ secrets.DEPENDENCIES_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN }}
           path: dependencies/RxAgentSDK
       - uses: actions/checkout@v4
         with:
           repository: rxtech-lab/film-workflow
-          token: ${{ secrets.DEPENDENCIES_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN }}
           path: dependencies/film-workflow
       - name: Configure CI package paths
         run: |
