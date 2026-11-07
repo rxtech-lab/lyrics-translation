@@ -10,10 +10,6 @@
 		076AB1E3228F4E326D2B3F69 /* LyricThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1DCB0966AD67998C3FBF3C1 /* LyricThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		28CCD6FC3A1CDFC4B8404061 /* LyricVideoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF417908B8B2C1220140EE5 /* LyricVideoSheet.swift */; };
 		32D1EB7681369667012A0D79 /* ConversationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */; };
-		7A11C0DE5EED000000000001 /* TranslateLinesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A11C0DE5EED000000000002 /* TranslateLinesSheet.swift */; };
-		7A11C0DE5EED000000000007 /* TranslationJobsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A11C0DE5EED000000000008 /* TranslationJobsSheet.swift */; };
-		7A11C0DE5EED000000000005 /* SplitLineSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A11C0DE5EED000000000006 /* SplitLineSheet.swift */; };
-		7A11C0DE5EED000000000003 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A11C0DE5EED000000000004 /* ConversationStore.swift */; };
 		32FB6C7179AAB5D1A6FCA072 /* UsageSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40E3E99C6F9325D6DE4A7CFA /* UsageSheet.swift */; };
 		3B41A5B4ECD4536045E0A69F /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = AFC197A608F37BC706C8CC85 /* Sparkle */; };
 		4828484A70B3B5222F971E40 /* LyricDocument.icns in Resources */ = {isa = PBXBuildFile; fileRef = EC954C373C7F7FDCBB58DD93 /* LyricDocument.icns */; };
@@ -22,12 +18,16 @@
 		54F53F3655BABAED6C7FA4BE /* Pipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86C9703B6195DDB42295188F /* Pipeline.swift */; };
 		647E450786795175F23C0BB4 /* TranslationTeamSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30D3031AE88B40531CE5997 /* TranslationTeamSheet.swift */; };
 		66A25B69EE1A823DFE35A357 /* MusicPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B95D185B8E16EFA2F1A255 /* MusicPlayback.swift */; };
+		677E007B2C7C2F7E7FA40D6E /* TranslateLinesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB04147AB4FDCE71EEE9CEF9 /* TranslateLinesSheet.swift */; };
 		6D6657BB8EF3B12FCE99CE2B /* PreviewSong.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD429D8797E7AA3D1D58321 /* PreviewSong.swift */; };
 		6E96C8552782097642AB7F4D /* RxAuthSwift in Frameworks */ = {isa = PBXBuildFile; productRef = E91B2566DCAA7C68C7A68B09 /* RxAuthSwift */; };
 		74B243B5BEEE8A26055490C3 /* KaraokeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E501A98DEDF6ECFFDAC261DD /* KaraokeSheet.swift */; };
 		7A4C94B90629D9BB64153419 /* RxRemotionUI in Frameworks */ = {isa = PBXBuildFile; productRef = 7C2A9F417AF35748C941C562 /* RxRemotionUI */; };
 		7DBD61F5B5C753D1E0A5139E /* Karaoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E31492533949AE6A15F18A4 /* Karaoke.swift */; };
 		832181EA8B3F4361FEDC32F3 /* WordTimingEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 219CD9B1B06537457D4B6188 /* WordTimingEditor.swift */; };
+		8722A7C049BC90E73E79DBF7 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A15FC477F95AB0B95522A4E /* ConversationStore.swift */; };
+		89D1AD934BE137A98C97C062 /* WaveformRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 630D685B788D3808B3E63081 /* WaveformRecorder.swift */; };
+		94E18EECDC650FDFDAC3874A /* TranslationJobsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83D0B1C807E6D21B4023FAD1 /* TranslationJobsSheet.swift */; };
 		9F40E2FD316116000B92767E /* OriginalLyricsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA6052EA2FAA44CEB23C2801 /* OriginalLyricsSheet.swift */; };
 		AAD8DD77D05D1932C666E734 /* RxRemotion in Frameworks */ = {isa = PBXBuildFile; productRef = C6343E09BC494AD52431802F /* RxRemotion */; };
 		AB02F319A10D30F3F881239C /* PreviewSong.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD429D8797E7AA3D1D58321 /* PreviewSong.swift */; };
@@ -35,6 +35,7 @@
 		BD4498008C0D2A03FB33EF41 /* icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E124E93C894B82AC4A039346 /* icon.icon */; };
 		CD1F3B7F728A4C1EFD0335CB /* AppUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE18244C72D78D4BFDE1CE33 /* AppUpdates.swift */; };
 		D7DDC65F73AAA39B7C33A1C4 /* RxAgentSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 995BE55FF01C334E1473E084 /* RxAgentSDK */; };
+		D929043DA074175571A1A439 /* SplitLineSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF9A0F2818E5AAFAD3C9F85 /* SplitLineSheet.swift */; };
 		DA1950E1D7A932644038272B /* ShareLyricsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4D25FA07E7B2859B11423BE /* ShareLyricsSheet.swift */; };
 		DD0B78743272BBC90E57F193 /* AutoTimingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC1DB690713CE8D922F7CB1 /* AutoTimingSheet.swift */; };
 		EAAF49A8BFBA238E638AABE7 /* GatewayPricing.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE5859B29E98A621AA2EAF44 /* GatewayPricing.swift */; };
@@ -90,17 +91,22 @@
 		40E3E99C6F9325D6DE4A7CFA /* UsageSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSheet.swift; sourceTree = "<group>"; };
 		41E289E4E4E3C7CC3094DA0F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4BDDEB133AA863719362729D /* AgentModelPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentModelPicker.swift; sourceTree = "<group>"; };
+		5A15FC477F95AB0B95522A4E /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
+		630D685B788D3808B3E63081 /* WaveformRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformRecorder.swift; sourceTree = "<group>"; };
 		6AD429D8797E7AA3D1D58321 /* PreviewSong.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewSong.swift; sourceTree = "<group>"; };
 		6AF417908B8B2C1220140EE5 /* LyricVideoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricVideoSheet.swift; sourceTree = "<group>"; };
 		75698CA8071C7CDFFF5BBA25 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
 		7E31492533949AE6A15F18A4 /* Karaoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Karaoke.swift; sourceTree = "<group>"; };
 		82BB4D11DC1CE5A3EF9486ED /* LyricPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LyricPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		83D0B1C807E6D21B4023FAD1 /* TranslationJobsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationJobsSheet.swift; sourceTree = "<group>"; };
 		86C9703B6195DDB42295188F /* Pipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pipeline.swift; sourceTree = "<group>"; };
 		91259A3A75691461BFE1EEC0 /* RxRemotion */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RxRemotion; path = "../rxlab/film-workflow/Packages/RxRemotion"; sourceTree = SOURCE_ROOT; };
 		A30D3031AE88B40531CE5997 /* TranslationTeamSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationTeamSheet.swift; sourceTree = "<group>"; };
 		A4D25FA07E7B2859B11423BE /* ShareLyricsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareLyricsSheet.swift; sourceTree = "<group>"; };
 		A8B95D185B8E16EFA2F1A255 /* MusicPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicPlayback.swift; sourceTree = "<group>"; };
+		ACF9A0F2818E5AAFAD3C9F85 /* SplitLineSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitLineSheet.swift; sourceTree = "<group>"; };
 		B1DCB0966AD67998C3FBF3C1 /* LyricThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LyricThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB04147AB4FDCE71EEE9CEF9 /* TranslateLinesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslateLinesSheet.swift; sourceTree = "<group>"; };
 		BBDCBB177FCC372589BE7F21 /* LineDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineDetailView.swift; sourceTree = "<group>"; };
 		C598CF6FB9A05787BF76BFA6 /* LyricStudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LyricStudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DE18244C72D78D4BFDE1CE33 /* AppUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdates.swift; sourceTree = "<group>"; };
@@ -113,10 +119,6 @@
 		EE5859B29E98A621AA2EAF44 /* GatewayPricing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayPricing.swift; sourceTree = "<group>"; };
 		F322F8E0233753FD8941057E /* StudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioView.swift; sourceTree = "<group>"; };
 		F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationSheet.swift; sourceTree = "<group>"; };
-		7A11C0DE5EED000000000002 /* TranslateLinesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslateLinesSheet.swift; sourceTree = "<group>"; };
-		7A11C0DE5EED000000000008 /* TranslationJobsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationJobsSheet.swift; sourceTree = "<group>"; };
-		7A11C0DE5EED000000000006 /* SplitLineSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitLineSheet.swift; sourceTree = "<group>"; };
-		7A11C0DE5EED000000000004 /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		FA6052EA2FAA44CEB23C2801 /* OriginalLyricsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OriginalLyricsSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -146,10 +148,7 @@
 				2B2D4D546A525ECC0798A2A6 /* AutoTiming.swift */,
 				DFC1DB690713CE8D922F7CB1 /* AutoTimingSheet.swift */,
 				F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */,
-				7A11C0DE5EED000000000002 /* TranslateLinesSheet.swift */,
-				7A11C0DE5EED000000000008 /* TranslationJobsSheet.swift */,
-				7A11C0DE5EED000000000006 /* SplitLineSheet.swift */,
-				7A11C0DE5EED000000000004 /* ConversationStore.swift */,
+				5A15FC477F95AB0B95522A4E /* ConversationStore.swift */,
 				EBC4922B0D515E12610D21CE /* Document.swift */,
 				EE5859B29E98A621AA2EAF44 /* GatewayPricing.swift */,
 				41E289E4E4E3C7CC3094DA0F /* Info.plist */,
@@ -162,10 +161,14 @@
 				FA6052EA2FAA44CEB23C2801 /* OriginalLyricsSheet.swift */,
 				86C9703B6195DDB42295188F /* Pipeline.swift */,
 				A4D25FA07E7B2859B11423BE /* ShareLyricsSheet.swift */,
+				ACF9A0F2818E5AAFAD3C9F85 /* SplitLineSheet.swift */,
 				F322F8E0233753FD8941057E /* StudioView.swift */,
 				EAB8D884C1FB0AF846276B95 /* SystemAudioCapture.swift */,
+				BB04147AB4FDCE71EEE9CEF9 /* TranslateLinesSheet.swift */,
+				83D0B1C807E6D21B4023FAD1 /* TranslationJobsSheet.swift */,
 				A30D3031AE88B40531CE5997 /* TranslationTeamSheet.swift */,
 				40E3E99C6F9325D6DE4A7CFA /* UsageSheet.swift */,
+				630D685B788D3808B3E63081 /* WaveformRecorder.swift */,
 				219CD9B1B06537457D4B6188 /* WordTimingEditor.swift */,
 			);
 			path = Lyrics;
@@ -387,10 +390,7 @@
 				FC0808A4932C0FC24DBE7A1D /* AutoTiming.swift in Sources */,
 				DD0B78743272BBC90E57F193 /* AutoTimingSheet.swift in Sources */,
 				32D1EB7681369667012A0D79 /* ConversationSheet.swift in Sources */,
-				7A11C0DE5EED000000000001 /* TranslateLinesSheet.swift in Sources */,
-				7A11C0DE5EED000000000007 /* TranslationJobsSheet.swift in Sources */,
-				7A11C0DE5EED000000000005 /* SplitLineSheet.swift in Sources */,
-				7A11C0DE5EED000000000003 /* ConversationStore.swift in Sources */,
+				8722A7C049BC90E73E79DBF7 /* ConversationStore.swift in Sources */,
 				4F88DD9596FAEF494B5DF4A6 /* Document.swift in Sources */,
 				EAAF49A8BFBA238E638AABE7 /* GatewayPricing.swift in Sources */,
 				7DBD61F5B5C753D1E0A5139E /* Karaoke.swift in Sources */,
@@ -401,10 +401,14 @@
 				9F40E2FD316116000B92767E /* OriginalLyricsSheet.swift in Sources */,
 				54F53F3655BABAED6C7FA4BE /* Pipeline.swift in Sources */,
 				DA1950E1D7A932644038272B /* ShareLyricsSheet.swift in Sources */,
+				D929043DA074175571A1A439 /* SplitLineSheet.swift in Sources */,
 				F0AAF79F35341E0201E8465C /* StudioView.swift in Sources */,
 				FE71EE515276FF8A62470D2C /* SystemAudioCapture.swift in Sources */,
+				677E007B2C7C2F7E7FA40D6E /* TranslateLinesSheet.swift in Sources */,
+				94E18EECDC650FDFDAC3874A /* TranslationJobsSheet.swift in Sources */,
 				647E450786795175F23C0BB4 /* TranslationTeamSheet.swift in Sources */,
 				32FB6C7179AAB5D1A6FCA072 /* UsageSheet.swift in Sources */,
+				89D1AD934BE137A98C97C062 /* WaveformRecorder.swift in Sources */,
 				832181EA8B3F4361FEDC32F3 /* WordTimingEditor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
