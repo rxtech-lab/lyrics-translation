@@ -37,8 +37,8 @@ struct RhymeVerdict: Decodable {
     }
 }
 
-struct TranslationRhymePlan: Decodable {
-    struct Group: Decodable {
+struct TranslationRhymePlan: Codable {
+    struct Group: Codable {
         let id: Int
         let lines: [Int]
         let sound: String
@@ -46,10 +46,22 @@ struct TranslationRhymePlan: Decodable {
         let anchor: String?
     }
     let groups: [Group]
-    let conflicts: [String]
+    struct Conflict: Codable {
+        let lines: [Int]
+        let reason: String
+    }
+    let conflicts: [Conflict]
+
+    /// Keep complete partner sets for relevant relationships; unrelated fixed lyrics cannot block this job.
+    func scoped(to editable: Set<Int>) -> Self {
+        Self(groups: groups.filter { !editable.isDisjoint(with: $0.lines) },
+             conflicts: conflicts.filter { $0.lines.isEmpty || !editable.isDisjoint(with: $0.lines) })
+    }
     func validate(lineCount: Int) throws {
         guard conflicts.isEmpty else {
-            throw PipelineError.invalid("Rhyme constraints conflict: " + conflicts.joined(separator: "; "))
+            throw PipelineError.rhymeConflict("Cannot satisfy rhymes within the selected lines. " + conflicts.map {
+                "Lines \($0.lines.map(String.init).joined(separator: ", ")): \($0.reason)"
+            }.joined(separator: "; ") + " Select the affected partner lines together and translate again, or revise the rhyme instructions.")
         }
         guard Set(groups.map(\.id)).count == groups.count,
               groups.allSatisfy({ ["end", "internal"].contains($0.kind) && !$0.lines.isEmpty && Set($0.lines).count == $0.lines.count &&
@@ -125,7 +137,12 @@ enum LenientJSON {
 }
 enum PipelineError: LocalizedError {
     case invalid(String)
-    var errorDescription: String? { if case .invalid(let text) = self { return text }; return nil }
+    case rhymeConflict(String)
+    var errorDescription: String? {
+        switch self {
+        case .invalid(let text), .rhymeConflict(let text): return text
+        }
+    }
 }
 @MainActor @Observable final class Pipeline {
     var running = false
@@ -307,6 +324,7 @@ enum PipelineError: LocalizedError {
                     song.wrappedValue.lines[index].translationTiming = nil
                 }
             }
+            var cachedPlan: TranslationRhymePlan?
             for retry in 0...3 {
             do {
                 try Task.checkCancellation()
@@ -322,7 +340,12 @@ enum PipelineError: LocalizedError {
                     song.wrappedValue.direction = direction
                 }
                 status = "Planning rhyme scheme"
-                let rhymePlan = try await ask(settings[1], """
+                let plan: TranslationRhymePlan
+                if let cachedPlan {
+                    plan = cachedPlan
+                } else {
+                let editable = Set(song.wrappedValue.lines.enumerated().filter { pendingTranslationIDs.contains($0.element.id) }.map { $0.offset + 1 })
+                let response = try await ask(settings[1], """
                 Plan the original song's internal and end-rhyme relationships using numbered lines, grouped by section.
                 Identify the end-rhyme scheme (AABB, ABAB, etc.) and assign a concrete target-language rhyme sound
                 and candidate ending words to each group in \(song.wrappedValue.target). Preserve rhyme relationships,
@@ -330,9 +353,14 @@ enum PipelineError: LocalizedError {
                 Existing translations of lines not being replaced are fixed anchors; choose compatible sounds.
                 Scope: only the editable line numbers listed below; all other translations are fixed.
                 Editable line numbers: \(song.wrappedValue.lines.enumerated().filter { pendingTranslationIDs.contains($0.element.id) }.map { $0.offset + 1 }).
-                Every genuine source rhyme relationship must belong to a group, including internal rhymes.
+                Every genuine source rhyme relationship touching an editable line must belong to a group, including internal rhymes.
+                Include all fixed partners of those groups, but omit groups involving only noneditable lines.
+                Existing rhyme problems entirely outside the editable scope must not block this job.
                 Never waive a relationship to make a candidate pass. If fixed translations cannot satisfy all groups,
-                report conflicts; do not demand edits outside the editable scope.
+                report only conflicts affecting editable lines; do not demand edits outside the editable scope.
+                Each conflict must be an object with lines (all affected 1-based line numbers, including editable members)
+                and reason (a concise explanation of the incompatible fixed words and sounds).
+                Put no commentary, general scheme notes, suggestions, or successful alternatives in conflicts.
                 Return JSON only: {"groups":[{"id":1,"lines":[1,2],"sound":"target-language phonetic rhyme nucleus and coda","kind":"end","anchor":"target-language example ending word"}],"conflicts":[]}.
                 Each group has a unique integer id, 1-based member line numbers, and a concrete target-language sound.
                 Set kind to end or internal. Split end and internal relationships into separate groups. For Mandarin end groups, anchor must be a Chinese example ending word with the planned pronunciation. An internal-only group has one member. Use an empty groups array only when no genuine rhymes exist.
@@ -340,8 +368,12 @@ enum PipelineError: LocalizedError {
                 Direction and explicit user requirements: \(direction)\(userInstruction)
                 Include internal rhymes and explicit line numbers. Lyrics: \(context)
                 """, step: "Rhyme plan")
-                let plan = try LenientJSON.decode(TranslationRhymePlan.self, from: rhymePlan, agent: "Rhyme planner")
+                let decoded = try LenientJSON.decode(TranslationRhymePlan.self, from: response, agent: "Rhyme planner")
+                plan = decoded.scoped(to: editable)
                 try plan.validate(lineCount: song.wrappedValue.lines.count)
+                cachedPlan = plan
+                }
+                let rhymePlan = String(decoding: try JSONEncoder().encode(plan), as: UTF8.self)
                 for index in song.wrappedValue.lines.indices {
                     let line = song.wrappedValue.lines[index]
                     guard pendingTranslationIDs.contains(line.id) else { continue }
@@ -410,6 +442,13 @@ enum PipelineError: LocalizedError {
                 if Task.isCancelled || error is CancellationError {
                     status = "Stopped · completed lines preserved"
                     finishJob(.stopped)
+                    return
+                }
+                if case PipelineError.rhymeConflict = error {
+                    self.error = error.localizedDescription
+                    canRetryTranslation = false
+                    status = "Translation blocked · rhyme constraints need changes"
+                    finishJob(.failed)
                     return
                 }
                 guard retry < 3, !pendingTranslationIDs.isEmpty else {
