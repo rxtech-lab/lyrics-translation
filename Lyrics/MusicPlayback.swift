@@ -26,48 +26,54 @@ enum MusicPlaybackError: LocalizedError {
 
     private var player: ApplicationMusicPlayer { ApplicationMusicPlayer.shared }
 
-    /// Smoothed position and when it was taken, plus the last raw player reading, used to fill in
-    /// between the player's coarse clock updates.
+    /// Smoothed position and when it was taken, the last raw player reading, and how far the smoothed
+    /// clock still has to catch up to (or fall back toward) the player.
     @ObservationIgnored private var anchor: (position: Double, at: Date)?
     @ObservationIgnored private var lastRaw: Double?
-    @ObservationIgnored private var lastReported: Double = 0
+    @ObservationIgnored private var pendingError: Double = 0
 
     /// Current position in seconds. Not observable; read it from a `TimelineView`.
     /// MusicKit's `playbackTime` only advances in steps, so between steps the position is extrapolated
-    /// from the wall clock at the playback rate, which keeps word highlights and timed presses in sync.
+    /// from the wall clock at the playback rate. Disagreements with the player are absorbed by briefly
+    /// running a little faster or slower (never backwards or frozen), so the playhead moves smoothly.
     var time: Double {
         let raw = player.playbackTime
         guard isPlaying else { resetClock(raw); return raw }
         let now = Date()
         let speed = Double(player.state.playbackRate > 0 ? player.state.playbackRate : rate)
-        var estimate = raw
-        if let anchor, let lastRaw {
-            let predicted = anchor.position + now.timeIntervalSince(anchor.at) * speed
-            if raw == lastRaw {
-                // No new reading yet: extrapolate, but never more than a second past the player.
-                estimate = min(predicted, raw + 1)
-            } else if abs(raw - predicted) < 0.3 {
-                // A fresh reading that agrees: stay smooth and ease toward the player.
-                estimate = predicted + (raw - predicted) * 0.2
-                self.anchor = (estimate, now)
-            } else {
+        guard let anchor else {
+            self.anchor = (raw, now)
+            lastRaw = raw
+            pendingError = 0
+            return raw
+        }
+        let elapsed = max(0, now.timeIntervalSince(anchor.at))
+        let predicted = anchor.position + elapsed * speed
+        if raw != lastRaw {
+            lastRaw = raw
+            let error = raw - predicted
+            if abs(error) > 0.5 {
                 // Seek or large drift: jump to the player.
                 self.anchor = (raw, now)
+                pendingError = 0
+                return raw
             }
-        } else {
-            anchor = (raw, now)
+            pendingError = error
         }
-        lastRaw = raw
-        // Don't wobble backwards by a hair; real seeks reset the clock.
-        if estimate < lastReported, lastReported - estimate < 0.3 { estimate = lastReported }
-        lastReported = estimate
-        return estimate
+        // Slew toward the player at up to ±40% of the playback speed so the clock stays continuous.
+        let limit = elapsed * speed * 0.4
+        let step = min(max(pendingError, -limit), limit)
+        pendingError -= step
+        // If the player hasn't reported progress (e.g. still buffering), don't run far ahead of it.
+        let position = min(predicted + step, raw + 1)
+        self.anchor = (max(position, anchor.position), now)
+        return self.anchor!.position
     }
 
     private func resetClock(_ position: Double) {
         anchor = nil
         lastRaw = nil
-        lastReported = position
+        pendingError = 0
     }
 
     var isPlaying: Bool { player.state.playbackStatus == .playing }

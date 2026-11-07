@@ -24,6 +24,29 @@ struct LyricLine: Codable, Identifiable, Hashable {
     /// Prompt prefix such as "[Chorus] Hamilton: ".
     var label: String { (section.map { "[\($0)] " } ?? "") + (speaker.map { "\($0): " } ?? "") }
 }
+/// One translation run over a set of lines, kept so it can be resumed.
+struct TranslationJob: Codable, Identifiable, Hashable {
+    enum State: String, Codable { case running, stopped, failed, completed }
+    var id = UUID()
+    var created = Date()
+    var updated = Date()
+    var title: String
+    var instruction = ""
+    /// Every line in the job, in song order.
+    var lineIDs: [UUID]
+    /// Lines not translated yet.
+    var pendingIDs: [UUID] = []
+    var state = State.running
+    var status = "Starting"
+    var error: String?
+
+    init(title: String, instruction: String, lineIDs: [UUID]) {
+        self.title = title
+        self.instruction = instruction
+        self.lineIDs = lineIDs
+        self.pendingIDs = lineIDs
+    }
+}
 struct AgentSetting: Codable, Identifiable {
     var id: String
     var provider = "Codex"
@@ -75,6 +98,8 @@ struct UsageStatsCache: Codable, Hashable, Sendable {
 }
 struct Song: Codable {
     var publicationID: UUID?
+    /// Stable id for the locally saved chat-agent conversation. Optional so older documents still open.
+    var conversationID: UUID?
     var target = "English"
     var direction = ""
     var lines: [LyricLine] = []
@@ -90,6 +115,12 @@ struct Song: Codable {
     var appleMusic: AppleMusicTrack?
     /// Seconds added to every Space press to compensate for reaction time.
     var timingOffset: Double?
+    /// Translation runs, newest first, so stopped or interrupted ones can be resumed. Optional so older documents still open.
+    var translationJobs: [TranslationJob]?
+    var jobs: [TranslationJob] {
+        get { translationJobs ?? [] }
+        set { translationJobs = newValue }
+    }
     var usage: [UsageSession] {
         get { usageLog ?? [] }
         set { usageLog = newValue }
@@ -111,6 +142,42 @@ struct Song: Codable {
         return output.joined(separator: "\n")
     }
     mutating func checkpoint(_ label: String) { versions.append(Revision(label: label, lines: lines, direction: direction)) }
+    /// Joins the given lines, in song order, into one line at the first one's position. Returns the merged line's id.
+    @discardableResult mutating func merge(_ ids: Set<UUID>) -> UUID? {
+        let indices = lines.indices.filter { ids.contains(lines[$0].id) }
+        guard let first = indices.first, indices.count > 1 else { return nil }
+        let parts = indices.map { lines[$0] }
+        func join(_ texts: [String]) -> String {
+            texts.filter { !$0.isEmpty }.reduce("") { result, next in
+                guard let last = result.last, let head = next.first else { return result + next }
+                // No space between CJK characters; a space everywhere else.
+                return result + (last.isCJK && head.isCJK ? "" : " ") + next
+            }
+        }
+        var merged = parts[0]
+        merged.original = join(parts.map(\.original))
+        merged.translated = parts.allSatisfy { !$0.translated.isEmpty } ? join(parts.map(\.translated)) : ""
+        merged.review = ""
+        merged.comment = parts.map(\.comment).filter { !$0.isEmpty }.joined(separator: "\n")
+        merged.approved = false
+        merged.syllables = 0; merged.stress = ""; merged.rhymes = []
+        merged.originalTiming = parts.allSatisfy { $0.originalTiming != nil } ? parts.flatMap { $0.originalTiming ?? [] } : nil
+        merged.translationTiming = !merged.translated.isEmpty && parts.allSatisfy { $0.translationTiming != nil } ? parts.flatMap { $0.translationTiming ?? [] } : nil
+        for index in indices.reversed() { lines.remove(at: index) }
+        lines.insert(merged, at: first)
+        return merged.id
+    }
+    /// Replaces one line with several. Translations are kept only when there is one per new line.
+    @discardableResult mutating func split(_ id: UUID, originals: [String], translations: [String]) -> [UUID] {
+        guard let index = lines.firstIndex(where: { $0.id == id }), originals.count > 1 else { return [] }
+        let source = lines[index]
+        let keep = translations.count == originals.count
+        let pieces = originals.enumerated().map { offset, text in
+            LyricLine(original: text, speaker: source.speaker, section: source.section, translated: keep ? translations[offset] : "", comment: source.comment)
+        }
+        lines.replaceSubrange(index...index, with: pieces)
+        return pieces.map(\.id)
+    }
     /// Stores a fresh rhyme analysis for one line and keeps links symmetric: a partner that points here
     /// shows up on this line even if the model missed it, and this line's partners point back to it.
     /// `relatedLines` are 1-based; self-references (an internal rhyme) are dropped.
@@ -156,5 +223,12 @@ struct LyricDocument: FileDocument {
     @StateObject private var updates = AppUpdates()
     var body: some Scene { DocumentGroup(newDocument: LyricDocument()) { file in StudioView(document: file.$document, title: file.fileURL?.deletingPathExtension().lastPathComponent ?? "") }
         .commands { CommandGroup(after: .appInfo) { Button("Check for Updates…") { updates.check() }.disabled(!updates.available) } }
+    }
+}
+
+private extension Character {
+    /// Han, kana and hangul, which are written without spaces between words.
+    var isCJK: Bool {
+        unicodeScalars.contains { (0x3040...0x30FF).contains($0.value) || (0x3400...0x9FFF).contains($0.value) || (0xAC00...0xD7AF).contains($0.value) || (0xF900...0xFAFF).contains($0.value) }
     }
 }

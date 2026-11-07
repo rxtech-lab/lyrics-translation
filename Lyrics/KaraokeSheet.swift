@@ -28,6 +28,10 @@ struct KaraokeSheet: View {
                         Divider()
                         KaraokeStage(song: song, track: track, display: display, playback: playback) { path.append(.timing) }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            // Clipping only affects drawing; moving lyric rows must not intercept
+                            // clicks on the song header or playback controls outside the stage.
+                            .contentShape(.rect)
+                            .clipped()
                         Divider()
                         TransportBar(playback: playback, duration: music.duration ?? 0, report: report)
                     }
@@ -165,16 +169,20 @@ private struct KaraokeStage: View {
     let playback: MusicPlayback
     var onTime: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The line the stage is scrolled to. Only moves forward during playback, so clock jitter can't bounce it.
-    @State private var focus = 0
-    /// Each line's measured height; positions are summed from these so offsets never feed back into layout.
-    @State private var heights: [Int: CGFloat] = [:]
-    /// Each line's measured height, used to scroll within a group taller than the stage.
-    @State private var lineHeights: [Int: CGFloat] = [:]
+    @State private var following = true
+    /// Line the stage scrolls to: the topmost line in focus.
+    @State private var target = 0
+    @State private var scroll = ScrollPosition(edge: .top)
+    /// Top of each line within the scroll content, used to place the focus line exactly.
+    @State private var rowTops: [Int: CGFloat] = [:]
+    nonisolated static let space = "karaoke-stage"
+    /// Where the focus line sits, as a fraction of the stage height from the top.
+    static let focusPoint: CGFloat = 0.3
+    @State private var playbackError: String?
 
     static let spacing: CGFloat = 36
-    /// Scroll to a line slightly before it is sung, like Apple Music.
-    static let lead = 0.25
+    /// Bring the next line into focus half a second before its first word.
+    static let lead = 0.5
 
     var body: some View {
         let lines = song.lines.compactMap { line in line.span(track).map { (line: line, span: $0) } }
@@ -189,70 +197,126 @@ private struct KaraokeStage: View {
         } else {
             let sides = speakerSides()
             let groups = Self.groups(lines.map(\.span))
-            TimelineView(.animation) { _ in
-                let time = playback.time
-                // Use each line's complete span: another singer starting must not hide it.
-                let active = Set(lines.indices.filter { lines[$0].span.lowerBound <= time && time < lines[$0].span.upperBound })
-                // The most recently started group (with a small lead) is the scroll target, so lines sung
-                // together stay together in focus.
-                let target = groups.indices.last { groups[$0].span.lowerBound <= time + Self.lead } ?? 0
-                let anchor = min(focus, groups.count - 1)
-                GeometryReader { geometry in
-                    let top = geometry.size.height * 0.3
-                    let inner = innerOffset(groups[anchor].lines, spans: lines.map(\.span), time: time,
-                                            groupHeight: heights[anchor] ?? 0, room: geometry.size.height * 0.55)
-                    let y = (0..<anchor).reduce(CGFloat(0)) { $0 + (heights[$1] ?? 0) + Self.spacing } + inner
-                    VStack(alignment: .leading, spacing: Self.spacing) {
-                        ForEach(groups.indices, id: \.self) { group in
-                            // Lines that overlap in time are one block, kept in lyric order.
-                            VStack(alignment: .leading, spacing: Self.groupSpacing) {
-                                ForEach(groups[group].lines, id: \.self) { index in
-                                    let item = lines[index]
-                                    let state: LineState = active.contains(index) ? .current : item.span.upperBound <= time ? .past : .upcoming
-                                    let previousTag = index > 0 ? lines[index - 1].line.tag : nil
-                                    line(item.line, span: item.span, time: time, state: state,
-                                         side: sides[item.line.speaker ?? ""] ?? .leading, showTag: item.line.tag != previousTag)
-                                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { lineHeights[index] = $0 }
-                                        .contentShape(.rect)
-                                        .onTapGesture { playback.seek(to: max(0, item.span.lowerBound - Self.lead)) }
+            // Lines in the order they are laid out on screen.
+            let order = groups.flatMap(\.lines)
+            // Name the singer when it changes from the line shown just above (on screen, not in lyric order),
+            // and always within lines sung together so each part is labelled.
+            // Lines that join a line already being sung are drawn smaller, like backing vocals.
+            let joined = Self.joined(lines.map(\.span))
+            let showTag: Set<Int> = {
+                var result = Set<Int>()
+                var previous: String??
+                for group in groups {
+                    for index in group.lines {
+                        let tag = lines[index].line.tag
+                        if group.lines.count > 1 || previous == nil || previous! != tag { result.insert(index) }
+                        previous = .some(tag)
+                    }
+                }
+                return result
+            }()
+            // The list itself stays still between frames so clicks on any line register reliably; only each
+            // line's words redraw per frame, and a lightweight clock below decides where to scroll.
+            GeometryReader { geometry in
+                let height = geometry.size.height
+                Group {
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: Self.spacing) {
+                            ForEach(groups.indices, id: \.self) { group in
+                                VStack(alignment: .leading, spacing: Self.groupSpacing) {
+                                    ForEach(groups[group].lines, id: \.self) { index in
+                                        let item = lines[index]
+                                        Button {
+                                            following = true
+                                            playback.seek(to: item.span.lowerBound)
+                                            target = index
+                                            scrollTo(index, height: height)
+                                            Task {
+                                                do { try await playback.play() }
+                                                catch { playbackError = error.localizedDescription }
+                                            }
+                                        } label: {
+                                            TimelineView(.animation) { _ in
+                                                let time = playback.time
+                                                line(item.line, span: item.span, time: time, state: Self.state(item.span, time: time),
+                                                     side: sides[item.line.speaker ?? ""] ?? .leading, showTag: showTag.contains(index),
+                                                     joined: joined.contains(index))
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .contentShape(.rect)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Play from this line")
+                                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { rowTops[index] = $0 }
+                                    }
                                 }
                             }
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[group] = $0 }
-                            .offset(y: top - y)
-                            // Groups below the focus follow a beat later, giving the cascading scroll.
-                            .animation(scroll(delay: group - anchor), value: anchor)
-                            .animation(scroll(delay: group - anchor), value: inner)
+                        }
+                        .padding(.horizontal, 56)
+                        // Real padding rather than content margins: on macOS, lines scrolled into a content
+                        // margin don't receive clicks.
+                        .padding(.top, height * Self.focusPoint)
+                        .padding(.bottom, height * 0.65)
+                        .coordinateSpace(.named(Self.space))
+                    }
+                    .scrollPosition($scroll)
+                    .scrollIndicators(.hidden)
+                    .onScrollPhaseChange { _, phase in
+                        if phase == .tracking || phase == .interacting { following = false }
+                    }
+                    .background {
+                        // Scroll clock: recomputes the focus line a few dozen times a second without
+                        // rebuilding the list.
+                        TimelineView(.animation(minimumInterval: 1 / 30)) { _ in
+                            let focus = Self.focusLine(lines.map(\.span), order: order, time: playback.time)
+                            Color.clear.onChange(of: focus, initial: true) { _, new in target = new }
                         }
                     }
-                    .padding(.horizontal, 56)
-                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
-                    .clipped()
-                    .mask {
-                        LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12),
-                                               .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
-                                       startPoint: .top, endPoint: .bottom)
+                    .onAppear { DispatchQueue.main.async { scrollTo(target, height: height, animated: false) } }
+                    .onChange(of: target) { _, new in
+                        if following { scrollTo(new, height: height) }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if !following {
+                            Button("Follow Playback", systemImage: "location.fill") {
+                                following = true
+                                scrollTo(target, height: height)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .padding(20)
+                        }
                     }
                 }
-                .onAppear { focus = target }
-                .onChange(of: target) { _, new in
-                    // Forward always; backward only for a real seek, not a few frames of clock correction.
-                    if new > focus || time + Self.lead < groups[min(focus, groups.count - 1)].span.lowerBound - 0.4 { focus = new }
-                }
             }
+            .alert("Playback Failed", isPresented: Binding(get: { playbackError != nil }, set: { if !$0 { playbackError = nil } })) {
+                Button("OK") { playbackError = nil }
+            } message: { Text(playbackError ?? "") }
         }
     }
 
     enum LineState { case past, current, upcoming }
 
-    /// How far to scroll into the focused group so its latest-started line stays visible when the
-    /// group is taller than the room below the focus point. Zero for groups that fit.
-    func innerOffset(_ members: [Int], spans: [ClosedRange<Double>], time: Double, groupHeight: CGFloat, room: CGFloat) -> CGFloat {
-        let excess = groupHeight - room
-        guard excess > 0 else { return 0 }
-        let started = members.indices.filter { spans[members[$0]].lowerBound <= time + Self.lead }
-        guard let latest = started.max(by: { spans[members[$0]].lowerBound < spans[members[$1]].lowerBound }) else { return 0 }
-        let before = members[..<latest].reduce(CGFloat(0)) { $0 + (lineHeights[$1] ?? 0) + Self.groupSpacing }
-        return min(before, excess)
+    /// Preview the line early, but keep word highlighting on the actual playback time.
+    /// Overlapping lines remain in focus until their own last word ends.
+    static func state(_ span: ClosedRange<Double>, time: Double) -> LineState {
+        if span.lowerBound <= time + lead && time < span.upperBound { return .current }
+        return span.upperBound <= time ? .past : .upcoming
+    }
+
+    /// The topmost line in focus: lines sung at the same time stay in view together below it, and the view
+    /// advances line by line as each one actually finishes, even when overlapping lines chain into one long
+    /// group. Between lines, stay on the line that started last.
+    static func focusLine(_ spans: [ClosedRange<Double>], order: [Int], time: Double) -> Int {
+        order.first { state(spans[$0], time: time) == .current }
+            ?? order.last { spans[$0].lowerBound <= time + lead }
+            ?? order.first ?? 0
+    }
+
+    /// Scrolls so the line's top sits at the focus point of the stage.
+    func scrollTo(_ index: Int, height: CGFloat, animated: Bool = true) {
+        guard let top = rowTops[index] else { return }
+        let y = max(0, top - height * Self.focusPoint)
+        if animated { withAnimation(scrollAnimation) { scroll.scrollTo(y: y) } } else { scroll.scrollTo(y: y) }
     }
 
     /// Gap between lines sung at the same time, tighter than between groups.
@@ -260,7 +324,7 @@ private struct KaraokeStage: View {
 
     /// Groups lines sung at the same time (e.g. two singers at once), wherever they sit in the lyrics:
     /// lines are walked in time order and a line joins the group when it starts before the group's latest end.
-    /// Groups are in time order; the lines inside a group keep lyric order.
+    /// Groups are in time order, and so are the lines inside a group.
     static func groups(_ spans: [ClosedRange<Double>]) -> [(lines: [Int], span: ClosedRange<Double>)] {
         var groups: [(lines: [Int], span: ClosedRange<Double>)] = []
         let byTime = spans.indices.sorted { (spans[$0].lowerBound, $0) < (spans[$1].lowerBound, $1) }
@@ -272,13 +336,28 @@ private struct KaraokeStage: View {
                 groups.append(([index], span))
             }
         }
-        return groups.map { ($0.lines.sorted(), $0.span) }
+        // Within a group, lines appear in the order they start, so a joining line sits below the one it joins.
+        return groups
     }
 
-    func scroll(delay steps: Int) -> Animation {
-        if reduceMotion { return .easeInOut(duration: 0.25) }
-        let delay = min(0.32, Double(max(0, steps + 1)) * 0.045)
-        return .spring(response: 0.7, dampingFraction: 0.9).delay(delay)
+    /// Lines sung together with one that started earlier: they overlap it by at least a second, or by half
+    /// their own length if shorter. Brief overlaps where one line runs into the next don't count.
+    static func joined(_ spans: [ClosedRange<Double>]) -> Set<Int> {
+        Set(spans.indices.filter { index in
+            let span = spans[index]
+            let needed = min(1, (span.upperBound - span.lowerBound) * 0.5)
+            return spans.indices.contains { other in
+                guard other != index, (spans[other].lowerBound, other) < (span.lowerBound, index) else { return false }
+                let overlap = min(span.upperBound, spans[other].upperBound) - max(span.lowerBound, spans[other].lowerBound)
+                return overlap >= needed
+            }
+        })
+    }
+
+    var scrollAnimation: Animation {
+        if reduceMotion { return .easeInOut(duration: 0.2) }
+        // Start immediately and settle without bounce within the next line's lead-in.
+        return .smooth(duration: 0.5, extraBounce: 0)
     }
 
     /// Alternates sides by order of first appearance: the first singer on the left, the next on the right.
@@ -290,7 +369,7 @@ private struct KaraokeStage: View {
         return sides
     }
 
-    func line(_ line: LyricLine, span: ClosedRange<Double>, time: Double, state: LineState, side: HorizontalAlignment, showTag: Bool) -> some View {
+    func line(_ line: LyricLine, span: ClosedRange<Double>, time: Double, state: LineState, side: HorizontalAlignment, showTag: Bool, joined: Bool = false) -> some View {
         // The large, word-highlighted text: the timed track, or the single language chosen to show.
         let main = display.single ?? track
         let words = line.words(main)
@@ -304,11 +383,12 @@ private struct KaraokeStage: View {
             }
             FlowLayout(alignment: side, lineSpacing: 6) {
                 ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                    KaraokeWord(text: word.text + (word.space ? " " : ""), progress: progress(ranges[index], time: time))
+                    KaraokeWord(text: word.text + (word.space ? " " : ""), progress: progress(ranges[index], time: time),
+                                font: joined ? KaraokeWord.joinedFont : KaraokeWord.lyricFont)
                 }
             }
             if !companion.isEmpty {
-                Text(companion).font(.title2.weight(.semibold)).foregroundStyle(.secondary).multilineTextAlignment(textAlignment)
+                Text(companion).font(joined ? .title3.weight(.semibold) : .title2.weight(.semibold)).foregroundStyle(.secondary).multilineTextAlignment(textAlignment)
             }
         }
         .frame(maxWidth: .infinity, alignment: alignment)
@@ -339,19 +419,22 @@ private struct KaraokeStage: View {
 /// A word that fills from left to right as it is sung, with a feathered edge and a slight lift.
 private struct KaraokeWord: View {
     static let lyricFont = Font.system(size: 40, weight: .bold)
+    /// Smaller size for a line that joins in while another is being sung.
+    static let joinedFont = Font.system(size: 28, weight: .bold)
     /// Width of the soft fill edge, as a fraction of the word.
     static let feather = 0.35
 
     let text: String
     let progress: Double
+    var font: Font = KaraokeWord.lyricFont
 
     var body: some View {
         let eased = progress * progress * (3 - 2 * progress)
         // Linear fill keeps the sweep moving at an even speed across word boundaries.
         let edge = progress * (1 + Self.feather)
-        Text(text).font(Self.lyricFont).foregroundStyle(.primary.opacity(0.3))
+        Text(text).font(font).foregroundStyle(.primary.opacity(0.3))
             .overlay {
-                Text(text).font(Self.lyricFont).foregroundStyle(.primary)
+                Text(text).font(font).foregroundStyle(.primary)
                     .mask {
                         LinearGradient(stops: [.init(color: .black, location: min(1, max(0, edge - Self.feather))),
                                                .init(color: .clear, location: min(1, max(0, edge)))],
