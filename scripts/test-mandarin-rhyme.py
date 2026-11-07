@@ -34,7 +34,25 @@ assert(failures("风霜", "", [0, 1]).isEmpty)
 assert(!failures("提醒", "", [0, 1]).isEmpty)
 assert(!failures("风霜", "").isEmpty)
 assert(failures("hello", "world", [0], "English").isEmpty)
-print("Mandarin rhyme regression checks passed")
+let scopedPlan = TranslationRhymePlan(groups: [
+    .init(id: 1, lines: [1, 2], sound: "ang", kind: "end", anchor: "光"),
+    .init(id: 2, lines: [3], sound: "in", kind: "internal", anchor: nil)
+], conflicts: [.init(lines: [3], reason: "Unrelated fixed internal rhyme")]).scoped(to: [1])
+try scopedPlan.validate(lineCount: 3)
+assert(scopedPlan.groups.count == 1)
+assert(scopedPlan.groups[0].lines == [1, 2])
+let blocked = TranslationRhymePlan(groups: scopedPlan.groups,
+    conflicts: [.init(lines: [1, 2], reason: "Fixed partner incompatible")]).scoped(to: [1])
+do {
+    try blocked.validate(lineCount: 3)
+    fatalError("Relevant conflict should block translation")
+} catch PipelineError.rhymeConflict(let message) {
+    assert(message.contains("1, 2"))
+} catch { fatalError("Expected nonretryable rhyme conflict") }
+let encoded = try JSONEncoder().encode(scopedPlan)
+let restored = try JSONDecoder().decode(TranslationRhymePlan.self, from: encoded)
+assert(restored.groups[0].lines == [1, 2])
+print("Mandarin rhyme and scoped planning regression checks passed")
 """
 with tempfile.TemporaryDirectory() as folder:
     path = Path(folder) / "checks.swift"
