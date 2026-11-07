@@ -82,12 +82,19 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           p12-password: ${{ secrets.P12_PASSWORD }}
+      - name: Install provisioning profile
+        env:
+          MACOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          # Associated Domains (passkeys) requires a Developer ID profile on the app target.
+          PROFILE_NAME=$(bash scripts/ci/install-provisioning-profile.sh MACOS_PROVISIONING_PROFILE_BASE64)
+          echo "LYRICSTUDIO_PROVISIONING_PROFILE=$PROFILE_NAME" >> "$GITHUB_ENV"
       - name: Archive and sign
         env:
           SIGNING_CERTIFICATE_NAME: ${{ secrets.SIGNING_CERTIFICATE_NAME }}
         run: |
           xcodegen generate --spec project.yml
-          xcodebuild -project LyricStudio.xcodeproj -scheme LyricStudio -configuration Release -destination 'generic/platform=macOS' -archivePath output/output.xcarchive -derivedDataPath output/DerivedData CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_CERTIFICATE_NAME" DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" OTHER_CODE_SIGN_FLAGS='--options=runtime --timestamp' ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO MARKETING_VERSION="${VERSION#v}" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" archive
+          xcodebuild -project LyricStudio.xcodeproj -scheme LyricStudio -configuration Release -destination 'generic/platform=macOS' -archivePath output/output.xcarchive -derivedDataPath output/DerivedData CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_CERTIFICATE_NAME" LYRICSTUDIO_PROVISIONING_PROFILE="$LYRICSTUDIO_PROVISIONING_PROFILE" OTHER_CODE_SIGN_FLAGS='--options=runtime --timestamp' ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO MARKETING_VERSION="${VERSION#v}" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" archive
           bash scripts/ci/sign-sparkle.sh
       - name: Package and notarize
         run: bash scripts/ci/notary.sh
