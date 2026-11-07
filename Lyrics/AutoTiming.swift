@@ -11,14 +11,15 @@ struct RecognizedWord: Sendable, Hashable {
 }
 
 enum AutoTimingError: LocalizedError {
-    case unsupportedLanguage(String), unreadableAudio, nothingRecognized, capturePermission, silentCapture
+    case unsupportedLanguage(String), unreadableAudio, nothingRecognized, capturePermission, captureFailed(String), silentCapture
 
     var errorDescription: String? {
         switch self {
         case .unsupportedLanguage(let name): "On-device speech recognition doesn’t support \(name) on this Mac."
         case .unreadableAudio: "This audio file can’t be read. Choose an unprotected file such as MP3, M4A, WAV or AIFF."
         case .nothingRecognized: "No sung words were recognised."
-        case .capturePermission: "Lyric Studio can’t listen to the song. Allow it in System Settings › Privacy & Security › Screen & System Audio Recording, then try again."
+        case .capturePermission: "Lyric Studio can’t listen to the song. Allow it in System Settings › Privacy & Security › Screen & System Audio Recording. If it’s already allowed, quit and reopen Lyric Studio: macOS only applies the permission after a relaunch."
+        case .captureFailed(let reason): "Lyric Studio couldn’t start listening to the song: \(reason)"
         case .silentCapture: "Lyric Studio couldn’t hear the song. macOS may be blocking recording of this protected Apple Music stream, the volume may be muted, or the Screen & System Audio Recording permission is off. Try again with a local copy of the recording."
         }
     }

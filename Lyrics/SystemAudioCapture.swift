@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import CoreMedia
 import ScreenCaptureKit
 
@@ -26,10 +27,15 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, @unc
     static var hostNow: Double { CMClockGetTime(CMClockGetHostTimeClock()).seconds }
 
     func start() async throws {
+        // macOS decides the permission once per launch: a grant made while the app runs needs a relaunch.
+        guard CGPreflightScreenCaptureAccess() else {
+            CGRequestScreenCaptureAccess()
+            throw AutoTimingError.capturePermission
+        }
         let content: SCShareableContent
         do { content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) }
-        catch { throw AutoTimingError.capturePermission }
-        guard let display = content.displays.first else { throw AutoTimingError.capturePermission }
+        catch { throw Self.failure(error) }
+        guard let display = content.displays.first else { throw AutoTimingError.captureFailed("No display is available to record from.") }
         let configuration = SCStreamConfiguration()
         configuration.capturesAudio = true
         configuration.excludesCurrentProcessAudio = false
@@ -44,7 +50,15 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, @unc
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         self.stream = stream
-        do { try await stream.startCapture() } catch { throw AutoTimingError.capturePermission }
+        do { try await stream.startCapture() } catch { throw Self.failure(error) }
+    }
+
+    /// Reports a denied permission as such, and any other failure with its real reason.
+    private static func failure(_ error: any Error) -> AutoTimingError {
+        if (error as NSError).domain == SCStreamErrorDomain, (error as NSError).code == SCStreamError.userDeclined.rawValue {
+            return .capturePermission
+        }
+        return .captureFailed(error.localizedDescription)
     }
 
     func stop() async {

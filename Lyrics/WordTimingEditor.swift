@@ -24,6 +24,14 @@ struct WordTimingEditor: View {
     @State private var scrollPosition = ScrollPosition(x: 0)
     @State private var viewportWidth: Double = 800
     @State private var scrollX: Double = 0
+    /// Playhead time and its on-screen offset, held fixed while the zoom slider is being dragged.
+    @State private var zoomAnchor: (time: Double, offset: Double)?
+    /// Latest slider value not yet applied; coalesces rapid slider changes into one update per run loop.
+    @State private var pendingZoom: Double?
+    /// Zoom level when the current pinch began.
+    @State private var pinchBase: Double?
+    /// Word under the playhead while the song plays, highlighted in the word strip.
+    @State private var playingWord: Int?
     @State private var drag: DragState?
     /// Undo history for this editor. Each entry is a line's words before (undo) or after (redo) a change.
     @State private var undoStack: [Snapshot] = []
@@ -37,6 +45,9 @@ struct WordTimingEditor: View {
     @State private var linkEdges = true
     @State private var auditionTask: Task<Void, Never>?
     @State private var confirmRevert = false
+    @State private var recorder = WaveformRecorder.shared
+    @State private var waveformAttached = false
+    @AppStorage("timing.showWaveform") private var showWaveform = true
     @FocusState private var focused: Bool
 
     enum Edge { case start, end, both }
@@ -85,8 +96,10 @@ struct WordTimingEditor: View {
             extraSelection = Set(words.indices.filter { words[$0].isTimed }).subtracting([selection])
             return .handled
         }
-        .onAppear { open(line); focused = true }
-        .onDisappear { auditionTask?.cancel() }
+        .onAppear { open(line); focused = true; updateWaveform() }
+        .onDisappear { auditionTask?.cancel(); if waveformAttached { recorder.detach(); waveformAttached = false } }
+        .onChange(of: showWaveform) { updateWaveform() }
+        .onChange(of: recorder.problem) { _, problem in if let problem { report("!" + problem) } }
         .navigationTitle("Line \(line + 1) Timing")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -102,6 +115,11 @@ struct WordTimingEditor: View {
                 Menu("More", systemImage: "ellipsis") {
                     Button("Fill Untimed Words", systemImage: "wand.and.stars") { fillLine() }
                     Button("Revert Line…", systemImage: "arrow.uturn.backward") { confirmRevert = true }.disabled(words == original)
+                    Button("Redraw Waveform", systemImage: "waveform.path") {
+                        if let id = playback.loadedID { recorder.clear(id); report("Waveform cleared · play the song to draw it again") }
+                    }
+                    .disabled(playback.loadedID == nil)
+                    .help("Forget the recorded waveform, e.g. if other sounds were playing while it was recorded")
                     Divider()
                     Button("Clear Line Timing", systemImage: "eraser", role: .destructive) {
                         words = words.map { TimedWord(text: $0.text, space: $0.space) }; commit(); report("Line timing cleared")
@@ -155,10 +173,15 @@ struct WordTimingEditor: View {
     var wordStrip: some View {
         FlowLayout(spacing: 6, lineSpacing: 6) {
             ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                let playing = index == playingWord
                 Text(word.text)
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .foregroundStyle(isSelected(index) ? AnyShapeStyle(.white) : word.isTimed ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    .background(isSelected(index) ? (index == selection ? AnyShapeStyle(.tint) : AnyShapeStyle(.tint.opacity(0.7))) : word.isTimed ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.5)), in: .rect(cornerRadius: 6))
+                    .foregroundStyle(isSelected(index) || playing ? AnyShapeStyle(.white) : word.isTimed ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .background(playing ? AnyShapeStyle(.orange) : isSelected(index) ? (index == selection ? AnyShapeStyle(.tint) : AnyShapeStyle(.tint.opacity(0.7))) : word.isTimed ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.5)), in: .rect(cornerRadius: 6))
+                    .overlay {
+                        // Keep the selection visible while the word is playing.
+                        if playing, isSelected(index) { RoundedRectangle(cornerRadius: 6).strokeBorder(.white, lineWidth: 2) }
+                    }
                     .overlay {
                         if !word.isTimed { RoundedRectangle(cornerRadius: 6).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3])).foregroundStyle(.secondary) }
                     }
@@ -168,6 +191,7 @@ struct WordTimingEditor: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20).padding(.vertical, 10)
+        .background { PlayingWordTracker(playback: playback, words: words, index: $playingWord) }
     }
 
     /// Timeline that grows with the window: the ruler on top, then a word track filling the remaining height.
@@ -189,6 +213,13 @@ struct WordTimingEditor: View {
                 Rectangle().fill(.quaternary.opacity(0.35)).frame(width: width, height: track).offset(y: 30)
                     .onTapGesture(coordinateSpace: .local) { point in playFrom(visible.lowerBound + point.x / pointsPerSecond) }
                     .gesture(marqueeGesture)
+                if showWaveform, let id = playback.loadedID {
+                    let leading = min(width, max(0, scrollX - 20))
+                    WaveformLane(recorder: recorder, id: id, start: visible.lowerBound + leading / pointsPerSecond, pointsPerSecond: pointsPerSecond)
+                        .frame(width: max(1, min(width - leading, viewportWidth + 20)), height: track)
+                        .offset(x: leading, y: 30)
+                        .allowsHitTesting(false)
+                }
                 if let marquee {
                     let low = min(marquee.from, marquee.to), high = max(marquee.from, marquee.to)
                     RoundedRectangle(cornerRadius: 4).fill(.tint.opacity(0.12))
@@ -216,6 +247,17 @@ struct WordTimingEditor: View {
             .padding(.horizontal, 20)
         }
         .scrollPosition($scrollPosition)
+        .simultaneousGesture(
+            // Trackpad pinch zooms around the playhead, like the zoom slider.
+            MagnifyGesture()
+                .onChanged { value in
+                    guard drag == nil else { return }
+                    let base = pinchBase ?? pointsPerSecond
+                    pinchBase = base
+                    zoom(to: base * value.magnification)
+                }
+                .onEnded { _ in pinchBase = nil; zoomAnchor = nil }
+        )
         .onScrollGeometryChange(for: CGRect.self) { geometry in
             geometry.visibleRect
         } action: { _, rect in
@@ -261,7 +303,10 @@ struct WordTimingEditor: View {
     var zoomBar: some View {
         HStack(spacing: 12) {
             Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-            Slider(value: $pointsPerSecond, in: 60...1200).frame(width: 200)
+            Slider(value: Binding(get: { pendingZoom ?? pointsPerSecond }, set: { zoom(to: $0) }), in: 60...1200) { editing in
+                if !editing { zoomAnchor = nil }
+            }
+            .frame(width: 200)
                 .disabled(drag != nil)
             Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
             Button("Fit Line", action: fit)
@@ -273,10 +318,28 @@ struct WordTimingEditor: View {
             .disabled(TimedWord.closingGaps(words) == words)
             .help("Extend each timed word to the next word’s start in this line")
             Spacer()
+            waveformStatus
+            Toggle("Waveform", isOn: $showWaveform).help("Draw the song’s waveform behind the words. It is recorded from the Mac’s audio as the song plays.")
             Toggle("Link touching edges", isOn: $linkEdges).help("Moving one word’s edge also moves the neighbour that touches it")
         }
         .controlSize(.small)
         .padding(.horizontal, 20).padding(.bottom, 10)
+    }
+
+    @ViewBuilder var waveformStatus: some View {
+        if showWaveform {
+            if let problem = recorder.problem {
+                Label("No waveform", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).help(problem)
+                Button("Try Again") { recorder.retry() }
+            } else if let id = playback.loadedID, recorder.revision >= 0, !recorder.hasWaveform(id) {
+                Text("Play the song to draw its waveform").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    func updateWaveform() {
+        if showWaveform, !waveformAttached { recorder.attach(); waveformAttached = true }
+        if !showWaveform, waveformAttached { recorder.detach(); waveformAttached = false }
     }
 
     @ViewBuilder var inspector: some View {
@@ -455,6 +518,38 @@ struct WordTimingEditor: View {
         // Wait for the new content width before positioning the scroll view.
         DispatchQueue.main.async {
             scrollPosition.scrollTo(x: low * pointsPerSecond)
+        }
+    }
+
+    /// Change the zoom level while keeping the playhead fixed on screen. If the playhead is out of view,
+    /// it is brought to the centre instead. The anchor is captured once per slider drag so a stale
+    /// scroll offset between rapid changes can't make the view drift.
+    func zoom(to newValue: Double) {
+        let wasPending = pendingZoom != nil
+        pendingZoom = min(1200, max(60, newValue))
+        guard !wasPending else { return }
+        // Apply outside the slider's callback (scrolling there re-enters AppKit layout), and change the
+        // scale and the scroll offset in the same update so the content never shifts for a frame.
+        DispatchQueue.main.async {
+            guard let new = pendingZoom else { return }
+            pendingZoom = nil
+            guard new != pointsPerSecond else { return }
+            let anchor = zoomAnchor ?? {
+                let time = playback.time
+                // Content x includes the 20pt leading padding; the time origin is always 0.
+                var offset = 20 + time * pointsPerSecond - scrollX
+                if offset < 0 || offset > viewportWidth { offset = viewportWidth / 2 }
+                return (time, offset)
+            }()
+            zoomAnchor = anchor
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                pointsPerSecond = new
+                let needed = anchor.time + viewportWidth / new + 30
+                if visible.upperBound < needed { visible = 0...needed }
+                scrollPosition.scrollTo(x: max(0, 20 + anchor.time * new - anchor.offset))
+            }
         }
     }
 
@@ -670,6 +765,30 @@ struct WordTimingEditor: View {
     func stamp(_ value: Double?) -> String { value.map { String(format: "%.3f s", $0) } ?? "…" }
 }
 
+/// Tracks which word is under the playhead. Playback time isn't observable, so this polls it in a
+/// tiny view and only writes `index` when the word changes, keeping the word strip from redrawing every frame.
+private struct PlayingWordTracker: View {
+    let playback: MusicPlayback
+    let words: [TimedWord]
+    @Binding var index: Int?
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30)) { _ in
+            let current = current()
+            Color.clear.onChange(of: current, initial: true) { _, new in index = new }
+        }
+    }
+
+    func current() -> Int? {
+        guard playback.isPlaying else { return nil }
+        let time = playback.time
+        return words.firstIndex { word in
+            guard let start = word.start, let end = word.end else { return false }
+            return start <= time && time < end
+        }
+    }
+}
+
 /// Time ruler with labelled ticks that adapt to the zoom level.
 private struct Ruler: View {
     let range: ClosedRange<Double>
@@ -693,6 +812,35 @@ private struct Ruler: View {
                 }
                 time += step
             }
+        }
+    }
+}
+
+/// The recorded waveform for the visible part of the timeline. Only this view redraws as recording adds audio.
+private struct WaveformLane: View {
+    let recorder: WaveformRecorder
+    let id: String
+    /// Song time at the view's leading edge.
+    let start: Double
+    let pointsPerSecond: Double
+
+    var body: some View {
+        let revision = recorder.revision
+        Canvas { context, size in
+            _ = revision
+            let step: Double = 2
+            let count = Int(size.width / step)
+            guard count > 0 else { return }
+            let levels = recorder.levels(id, range: start...(start + Double(count) * step / pointsPerSecond), count: count)
+            let middle = size.height / 2, reach = size.height / 2 - 4
+            var path = Path()
+            for (column, level) in levels.enumerated() {
+                guard let level else { continue }
+                // Square root keeps quiet passages visible next to loud ones.
+                let half = max(0.5, Double(level).squareRoot() * reach)
+                path.addRect(CGRect(x: Double(column) * step, y: middle - half, width: step - 0.5, height: half * 2))
+            }
+            context.fill(path, with: .color(.secondary.opacity(0.45)))
         }
     }
 }
