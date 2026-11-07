@@ -13,6 +13,7 @@ struct LineDetailView: View {
     @State private var startingPlayback = false
     var onReview: () -> Void
     var onTranslate: () -> Void
+    var onTranslateWithInstructions: () -> Void
     var onDeleteTranslation: () -> Void
     var onSelectLine: (Int) -> Void
 
@@ -123,10 +124,17 @@ struct LineDetailView: View {
 
     var actions: some View {
         HStack(spacing: 10) {
-            Button(action: onTranslate) {
+            Menu {
+                Button("Translate with Instructions…", systemImage: "text.bubble", action: onTranslateWithInstructions)
+            } label: {
                 Label(line.translated.isEmpty ? "Translate line" : "Retranslate", systemImage: "wand.and.sparkles")
+            } primaryAction: {
+                onTranslate()
             }
+            .menuStyle(.button)
             .buttonStyle(.borderedProminent)
+            .fixedSize()
+            .help("Click to translate; open the menu to add instructions or pick more lines")
             Button(action: onReview) { Label("Review line", systemImage: "checkmark.bubble") }
                 .buttonStyle(.bordered)
             Spacer()

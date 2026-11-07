@@ -133,10 +133,34 @@ enum PipelineError: LocalizedError {
     var transcript = ""
     var error: String?
     private var pendingTranslationIDs: Set<UUID> = []
+    /// Extra direction for the current (re)translation, kept so a retry honours it too.
+    private var activeInstruction = ""
     var canRetryTranslation = false
     func retryTranslation(song: Binding<Song>) {
         guard canRetryTranslation, !running else { return }
-        start(song: song, retryIDs: pendingTranslationIDs)
+        start(song: song, instruction: activeInstruction, retryIDs: pendingTranslationIDs, jobID: jobID)
+    }
+    /// Job the running (or last) translation belongs to.
+    private(set) var jobID: UUID?
+    @ObservationIgnored private var jobSong: Binding<Song>?
+    /// Continues a stopped, failed or interrupted job with its remaining lines, instruction and the song's direction.
+    func resume(_ job: TranslationJob, song: Binding<Song>) {
+        let existing = Set(song.wrappedValue.lines.map(\.id))
+        start(song: song, instruction: job.instruction, retryIDs: Set(job.pendingIDs).intersection(existing), jobID: job.id)
+    }
+    private func updateJob(_ change: (inout TranslationJob) -> Void) {
+        guard let jobSong, let jobID, let index = jobSong.wrappedValue.jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        change(&jobSong.wrappedValue.jobs[index])
+        jobSong.wrappedValue.jobs[index].updated = Date()
+    }
+    private func finishJob(_ state: TranslationJob.State) {
+        let pending = pendingTranslationIDs, status = status, error = error
+        updateJob { job in
+            job.state = state
+            job.pendingIDs = job.lineIDs.filter { pending.contains($0) }
+            job.status = status
+            job.error = state == .failed ? error : nil
+        }
     }
     private var task: Task<Void, Never>?
     private var active: (any AgentClient)?
@@ -235,24 +259,45 @@ enum PipelineError: LocalizedError {
     }
     /// - Parameter resume: when translating all lines, skip lines that already have a translation
     ///   and reuse the existing direction if there is one.
-    func start(song: Binding<Song>, only: UUID? = nil, resume: Bool = false, retryIDs: Set<UUID>? = nil) {
+    /// - Parameter lines: translate only these lines (one or a batch); `nil` means every line.
+    /// - Parameter instruction: extra user or agent direction for this run, e.g. a recommended wording.
+    /// - Parameter jobID: continue this job in the job list instead of recording a new one.
+    func start(song: Binding<Song>, only: UUID? = nil, lines: Set<UUID>? = nil, instruction: String = "", resume: Bool = false, retryIDs: Set<UUID>? = nil, jobID: UUID? = nil) {
         guard !running else { return }
-        let resume = resume && only == nil
+        let scope: Set<UUID>? = only.map { [$0] } ?? lines
+        let resume = resume && scope == nil
+        let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        activeInstruction = instruction
         pendingTranslationIDs = Set(song.wrappedValue.lines.filter {
             !$0.original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            (only == nil || only == $0.id) && (!resume || $0.translated.isEmpty) &&
+            (scope == nil || scope!.contains($0.id)) && (!resume || $0.translated.isEmpty) &&
             (retryIDs == nil || retryIDs!.contains($0.id))
         }.map(\.id))
         guard !pendingTranslationIDs.isEmpty else { canRetryTranslation = false; status = "No lines to translate"; return }
         let remaining = song.wrappedValue.lines.filter { $0.translated.isEmpty }.count
         if resume && remaining == 0 { status = "Every line is already translated"; return }
         running = true; error = nil; transcript = ""; canRetryTranslation = false
-        let lineNumber = only.flatMap { id in song.wrappedValue.lines.firstIndex { $0.id == id } }.map { $0 + 1 }
-        beginUsage(lineNumber.map { "Translate line \($0)" } ?? (resume ? "Resume translation · \(remaining) lines" : "Translate all · \(song.wrappedValue.lines.count) lines"), song: song)
+        let numbers = song.wrappedValue.lines.indices.filter { pendingTranslationIDs.contains(song.wrappedValue.lines[$0].id) }.map { $0 + 1 }
+        let title = scope == nil
+            ? (resume ? "Resume translation · \(remaining) lines" : "Translate all · \(song.wrappedValue.lines.count) lines")
+            : (numbers.count == 1 ? "Translate line \(numbers[0])" : "Translate \(numbers.count) lines")
+        beginUsage(instruction.isEmpty ? title : title + " · with instructions", song: song)
+        // Record the job so it can be resumed from the job list after a stop, failure or quit.
+        let ordered = song.wrappedValue.lines.map(\.id).filter { pendingTranslationIDs.contains($0) }
+        jobSong = song
+        if let jobID, song.wrappedValue.jobs.contains(where: { $0.id == jobID }) {
+            self.jobID = jobID
+            updateJob { $0.state = .running; $0.pendingIDs = ordered; $0.status = "Resuming"; $0.error = nil }
+        } else {
+            let job = TranslationJob(title: instruction.isEmpty ? title : title + " · with instructions", instruction: instruction, lineIDs: ordered)
+            song.wrappedValue.jobs.insert(job, at: 0)
+            self.jobID = job.id
+        }
+        let userInstruction = instruction.isEmpty ? "" : " Retranslation instructions from the user (highest priority for the editable lines; may include recommended wording to adopt or adapt): \(instruction)."
         task = Task {
             defer { running = false; active = nil; turn = nil; endUsage() }
             song.wrappedValue.checkpoint("Before translation")
-            if only == nil && !resume && retryIDs == nil {
+            if scope == nil && !resume && retryIDs == nil {
                 // Archive the previous work before starting a clean translation version.
                 // Clear once, outside the retry loop, so retries retain completed lines.
                 for index in song.wrappedValue.lines.indices {
@@ -292,7 +337,7 @@ enum PipelineError: LocalizedError {
                 Each group has a unique integer id, 1-based member line numbers, and a concrete target-language sound.
                 Set kind to end or internal. Split end and internal relationships into separate groups. For Mandarin end groups, anchor must be a Chinese example ending word with the planned pronunciation. An internal-only group has one member. Use an empty groups array only when no genuine rhymes exist.
                 For Mandarin compare spoken finals (including nasal codas), not characters or tone alone.
-                Direction and explicit user requirements: \(direction)
+                Direction and explicit user requirements: \(direction)\(userInstruction)
                 Include internal rhymes and explicit line numbers. Lyrics: \(context)
                 """, step: "Rhyme plan")
                 let plan = try LenientJSON.decode(TranslationRhymePlan.self, from: rhymePlan, agent: "Rhyme planner")
@@ -300,7 +345,7 @@ enum PipelineError: LocalizedError {
                 for index in song.wrappedValue.lines.indices {
                     let line = song.wrappedValue.lines[index]
                     guard pendingTranslationIDs.contains(line.id) else { continue }
-                    let base = "Target language: \(song.wrappedValue.target). Direction: \(direction). Full song: \(context). Current line \(index + 1): \(line.label)\(line.original). Translate only the sung text; do not include the speaker or section label. User feedback: \(line.comment)."
+                    let base = "Target language: \(song.wrappedValue.target). Direction: \(direction). Full song: \(context). Current line \(index + 1): \(line.label)\(line.original). Translate only the sung text; do not include the speaker or section label. User feedback: \(line.comment).\(userInstruction)"
                     status = "Line \(index + 1): rhythm and rhyme"
                     let raw = try await ask(settings[1], base + " Return JSON only: {\"syllables\":8,\"stress\":\"01010101\",\"rhymes\":[{\"words\":\"night / light\",\"sound\":\"aɪt\",\"relatedLines\":[\(index + 2)]}]}. Find every rhyme between line \(index + 1) and the lines up to 8 before AND after it. relatedLines are the numbers of the OTHER partner lines, exactly as numbered in the full song (this line is \(index + 1)); never list \(index + 1) itself. words names this line's word and the partner word. Count perfect rhymes and also near/slant rhymes a lyricist would hear: matching final vowel sounds even when stress differs (me / busy, see / city), assonance, consonance and multisyllabic rhymes. Report internal rhymes within the line with empty relatedLines. Stress is 0/1 per syllable; this is text-based estimated meter, not measured music beats.", step: "Line \(index + 1) · Rhythm")
                     let analysis = try LenientJSON.decode(Analysis.self, from: raw, agent: "Rhythm agent")
@@ -354,19 +399,24 @@ enum PipelineError: LocalizedError {
                     song.wrappedValue.lines[index].review = review + "\n\nRhyme verification: " + rhymeFeedback
                     song.wrappedValue.lines[index].approved = false
                     pendingTranslationIDs.remove(line.id)
+                    let pending = pendingTranslationIDs, status = status
+                    updateJob { job in job.pendingIDs = job.lineIDs.filter { pending.contains($0) }; job.status = status }
                     song.wrappedValue.checkpoint("Revised line \(index + 1)")
                 }
                 status = "Ready for your review"
+                finishJob(.completed)
                 return
             } catch {
                 if Task.isCancelled || error is CancellationError {
                     status = "Stopped · completed lines preserved"
+                    finishJob(.stopped)
                     return
                 }
                 guard retry < 3, !pendingTranslationIDs.isEmpty else {
                     self.error = error.localizedDescription
                     canRetryTranslation = !pendingTranslationIDs.isEmpty
                     status = "Translation failed after 3 retries"
+                    finishJob(.failed)
                     return
                 }
                 status = "Translation failed · retrying (\(retry + 1)/3)"
@@ -375,6 +425,7 @@ enum PipelineError: LocalizedError {
                     try await Task.sleep(for: .seconds(retry + 1))
                 } catch {
                     status = "Stopped · completed lines preserved"
+                    finishJob(.stopped)
                     return
                 }
             }

@@ -18,7 +18,12 @@ struct StudioView: View {
     @State private var comment = ""
     @State private var edited = ""
     @State private var restore: Revision?
-    @State private var chatting = false
+    @State private var conversationID = UUID()
+    /// Lines preselected in the Translate Lines sheet; non-nil while it is shown.
+    @State private var translatingIDs: Set<UUID>?
+    /// Line shown in the Split Line sheet.
+    @State private var splittingID: UUID?
+    @State private var showingJobs = false
     @State private var showingUsage = false
     @State private var karaoke = false
     @State private var musicError: String?
@@ -94,6 +99,15 @@ struct StudioView: View {
             }
             .contextMenu(forSelectionType: UUID.self) { ids in
                 if !ids.isEmpty {
+                    Button(ids.count == 1 ? "Translate with Instructions…" : "Translate \(ids.count) Lines…", systemImage: "wand.and.sparkles") { translatingIDs = ids }
+                        .disabled(pipeline.running)
+                    Divider()
+                    if ids.count > 1 {
+                        Button("Merge \(ids.count) Lines", systemImage: "arrow.triangle.merge") { merge(ids) }.disabled(pipeline.running)
+                    } else if let id = ids.first {
+                        Button("Split Line…", systemImage: "arrow.triangle.branch") { splittingID = id }.disabled(pipeline.running)
+                    }
+                    Divider()
                     Button(ids.count == 1 ? "Share Line…" : "Share \(ids.count) Lines…", systemImage: "square.and.arrow.up") {
                         shareLineIDs = ids
                         sharing = true
@@ -110,22 +124,14 @@ struct StudioView: View {
             .navigationTitle("Lyrics").navigationSplitViewColumnWidth(min: 220, ideal: 280)
         } detail: {
             VStack(spacing: 0) {
-                if selection.count > 1 {
-                    ContentUnavailableView {
-                        Label("\(selection.count) lines selected", systemImage: "text.badge.checkmark")
-                    } description: {
-                        Text("Right-click to share the selected lines, or press Delete to remove them.")
-                    } actions: {
-                        let translated = translatedIDs(in: selection)
-                        Button(translated.count == 1 ? "Delete Translation" : "Delete \(translated.count) Translations", role: .destructive) { pendingClear = translated }.disabled(translated.isEmpty || pipeline.running)
-                        Button("Delete \(selection.count) Lines", role: .destructive) { pendingDelete = selection }.disabled(pipeline.running)
-                    }
-                } else if let index = document.song.lines.firstIndex(where: { selection.contains($0.id) }) {
+                if let index = document.song.lines.firstIndex(where: { selection.contains($0.id) }) {
                     let line = document.song.lines[index]
                     LineDetailView(line: line, number: index + 1, total: document.song.lines.count, lines: document.song.lines, busy: pipeline.running, music: document.song.appleMusic) {
                         comment = line.comment; edited = line.translated; sheet = "Review line"
                     } onTranslate: {
                         pipeline.start(song: $document.song, only: line.id)
+                    } onTranslateWithInstructions: {
+                        translatingIDs = [line.id]
                     } onDeleteTranslation: {
                         pendingClear = [line.id]
                     } onSelectLine: { number in
@@ -159,7 +165,7 @@ struct StudioView: View {
             // Insights: read-only views into what the agents did.
             ToolbarItem(placement: .primaryAction) {
                 Menu("Insights", systemImage: "sparkles.rectangle.stack") {
-                    Button("Agent Conversation", systemImage: "bubble.left.and.bubble.right") { chatting = true }
+                    Button("Agent Conversation", systemImage: "bubble.left.and.bubble.right") { ConversationWindow.open(id: conversationID, song: $document.song, pipeline: pipeline, title: title) }
                     Button("Activity Log", systemImage: "list.bullet.rectangle") { sheet = "Activity" }
                     Button("Usage & Cost", systemImage: "chart.bar.xaxis") { showingUsage = true }
                 }
@@ -173,6 +179,14 @@ struct StudioView: View {
                     .help("Time sung words to an Apple Music recording")
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) {
+                let resumable = document.song.jobs.filter { $0.state != .completed && !(pipeline.running && pipeline.jobID == $0.id) && !$0.pendingIDs.isEmpty }.count
+                Button { showingJobs = true } label: {
+                    Label("Jobs", systemImage: resumable > 0 ? "list.bullet.clipboard.fill" : "list.bullet.clipboard")
+                }
+                .badge(resumable)
+                .help(resumable > 0 ? "\(resumable) translation job\(resumable == 1 ? "" : "s") can be resumed" : "Translation jobs")
+            }
             // The one primary action, which turns into Stop while agents run.
             ToolbarItem(placement: .primaryAction) {
                 if pipeline.running {
@@ -250,12 +264,34 @@ struct StudioView: View {
         .sheet(isPresented: Binding(get: { team != nil }, set: { if !$0 { team = nil } })) {
             TranslationTeamSheet(song: $document.song, startsTranslation: team ?? false) { resume in pipeline.start(song: $document.song, resume: resume) }
         }
-        .sheet(isPresented: $chatting) { ConversationSheet(song: document.song) }
+        .sheet(isPresented: Binding(get: { translatingIDs != nil }, set: { if !$0 { translatingIDs = nil } })) {
+            TranslateLinesSheet(lines: document.song.lines, initial: translatingIDs ?? []) { ids, instruction in
+                pipeline.start(song: $document.song, lines: ids, instruction: instruction)
+            }
+        }
+        .sheet(isPresented: Binding(get: { splittingID != nil }, set: { if !$0 { splittingID = nil } })) {
+            if let id = splittingID, let index = document.song.lines.firstIndex(where: { $0.id == id }) {
+                SplitLineSheet(line: document.song.lines[index], number: index + 1) { originals, translations in
+                    document.song.checkpoint("Before splitting line \(index + 1)")
+                    let ids = document.song.split(id, originals: originals, translations: translations)
+                    selection = Set(ids.prefix(1))
+                    pipeline.status = "Split line \(index + 1) into \(ids.count) lines"
+                }
+            }
+        }
+        .sheet(isPresented: $showingJobs) { TranslationJobsSheet(song: $document.song, pipeline: pipeline) }
         .sheet(isPresented: $sharing) { ShareLyricsSheet(song: $document.song, title: title, initialLineIDs: shareLineIDs) }
         .sheet(isPresented: $showingUsage) { UsageSheet(song: $document.song) }
         .sheet(isPresented: $video) { LyricVideoSheet(song: document.song, title: title) }
         .sheet(isPresented: $karaoke) { KaraokeSheet(song: $document.song, title: title) }
-        .onDisappear { pipeline.stop() }
+        .onDisappear { pipeline.stop(); ConversationWindow.close(id: conversationID) }
+    }
+    private func merge(_ ids: Set<UUID>) {
+        let numbers = document.song.lines.indices.filter { ids.contains(document.song.lines[$0].id) }.map { $0 + 1 }
+        guard numbers.count > 1 else { return }
+        document.song.checkpoint("Before merging lines \(numbers.map(String.init).joined(separator: ", "))")
+        if let merged = document.song.merge(ids) { selection = [merged] }
+        pipeline.status = "Merged \(numbers.count) lines into line \(numbers[0])"
     }
     @ViewBuilder var sheetContent: some View {
         switch sheet {
@@ -265,7 +301,7 @@ struct StudioView: View {
                 Text("Direction for retranslation").font(.headline); TextEditor(text: $comment)
                 HStack {
                     Button("Approve") { saveReview(approve: true) }
-                    Button("Save feedback and retranslate") { saveReview(approve: false); pipeline.start(song: $document.song, only: selection.first) }
+                    Button("Save feedback and retranslate") { saveReview(approve: false); pipeline.start(song: $document.song, only: document.song.lines.first { selection.contains($0.id) }?.id) }
                 }
             }.padding()
         case "Versions":
