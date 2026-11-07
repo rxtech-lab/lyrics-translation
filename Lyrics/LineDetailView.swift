@@ -14,6 +14,7 @@ struct LineDetailView: View {
     var onReview: () -> Void
     var onTranslate: () -> Void
     var onTranslateWithInstructions: () -> Void
+    var onEditTranslation: () -> Void
     var onDeleteTranslation: () -> Void
     var onSelectLine: (Int) -> Void
 
@@ -135,6 +136,9 @@ struct LineDetailView: View {
             .buttonStyle(.borderedProminent)
             .fixedSize()
             .help("Click to translate; open the menu to add instructions or pick more lines")
+            Button(action: onEditTranslation) { Label(line.translated.isEmpty ? "Write translation" : "Edit translation", systemImage: "pencil") }
+                .buttonStyle(.bordered)
+                .help("Type or change this line’s translation yourself")
             Button(action: onReview) { Label("Review line", systemImage: "checkmark.bubble") }
                 .buttonStyle(.bordered)
             Spacer()

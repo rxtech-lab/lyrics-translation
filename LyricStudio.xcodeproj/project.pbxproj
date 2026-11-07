@@ -11,6 +11,7 @@
 		28CCD6FC3A1CDFC4B8404061 /* LyricVideoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF417908B8B2C1220140EE5 /* LyricVideoSheet.swift */; };
 		32D1EB7681369667012A0D79 /* ConversationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */; };
 		32FB6C7179AAB5D1A6FCA072 /* UsageSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40E3E99C6F9325D6DE4A7CFA /* UsageSheet.swift */; };
+		3A003A9264C417563D53704C /* EditTranslationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8D8F706C74282D245D17B01 /* EditTranslationSheet.swift */; };
 		3B41A5B4ECD4536045E0A69F /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = AFC197A608F37BC706C8CC85 /* Sparkle */; };
 		4828484A70B3B5222F971E40 /* LyricDocument.icns in Resources */ = {isa = PBXBuildFile; fileRef = EC954C373C7F7FDCBB58DD93 /* LyricDocument.icns */; };
 		48D8342B68BC1F550A017A5E /* LineDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDCBB177FCC372589BE7F21 /* LineDetailView.swift */; };
@@ -113,6 +114,7 @@
 		DFC1DB690713CE8D922F7CB1 /* AutoTimingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTimingSheet.swift; sourceTree = "<group>"; };
 		E124E93C894B82AC4A039346 /* icon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = icon.icon; sourceTree = "<group>"; };
 		E501A98DEDF6ECFFDAC261DD /* KaraokeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KaraokeSheet.swift; sourceTree = "<group>"; };
+		E8D8F706C74282D245D17B01 /* EditTranslationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTranslationSheet.swift; sourceTree = "<group>"; };
 		EAB8D884C1FB0AF846276B95 /* SystemAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCapture.swift; sourceTree = "<group>"; };
 		EBC4922B0D515E12610D21CE /* Document.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Document.swift; sourceTree = "<group>"; };
 		EC954C373C7F7FDCBB58DD93 /* LyricDocument.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = LyricDocument.icns; sourceTree = "<group>"; };
@@ -150,6 +152,7 @@
 				F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */,
 				5A15FC477F95AB0B95522A4E /* ConversationStore.swift */,
 				EBC4922B0D515E12610D21CE /* Document.swift */,
+				E8D8F706C74282D245D17B01 /* EditTranslationSheet.swift */,
 				EE5859B29E98A621AA2EAF44 /* GatewayPricing.swift */,
 				41E289E4E4E3C7CC3094DA0F /* Info.plist */,
 				7E31492533949AE6A15F18A4 /* Karaoke.swift */,
@@ -392,6 +395,7 @@
 				32D1EB7681369667012A0D79 /* ConversationSheet.swift in Sources */,
 				8722A7C049BC90E73E79DBF7 /* ConversationStore.swift in Sources */,
 				4F88DD9596FAEF494B5DF4A6 /* Document.swift in Sources */,
+				3A003A9264C417563D53704C /* EditTranslationSheet.swift in Sources */,
 				EAAF49A8BFBA238E638AABE7 /* GatewayPricing.swift in Sources */,
 				7DBD61F5B5C753D1E0A5139E /* Karaoke.swift in Sources */,
 				74B243B5BEEE8A26055490C3 /* KaraokeSheet.swift in Sources */,
