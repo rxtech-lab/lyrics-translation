@@ -490,8 +490,8 @@ enum PipelineError: LocalizedError {
                     song.wrappedValue.lines[index].review = review + "\n\nRhyme verification: " + rhymeFeedback
                     song.wrappedValue.lines[index].approved = false
                     pendingTranslationIDs.remove(line.id)
-                    let pending = pendingTranslationIDs, status = status
-                    updateJob { job in job.pendingIDs = job.lineIDs.filter { pending.contains($0) }; job.status = status }
+                    let pending = pendingTranslationIDs, currentStatus = status
+                    updateJob { job in job.pendingIDs = job.lineIDs.filter { pending.contains($0) }; job.status = currentStatus }
                     song.wrappedValue.checkpoint("Revised line \(index + 1)")
                 }
                 if pendingTranslationIDs.isEmpty {
