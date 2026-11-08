@@ -329,6 +329,7 @@ enum PipelineError: LocalizedError {
         let scope: Set<UUID>? = only.map { [$0] } ?? lines
         let resume = resume && scope == nil
         let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recoveryFeedback = jobID.flatMap { id in song.wrappedValue.jobs.first { $0.id == id }?.error }
         activeInstruction = instruction
         pendingTranslationIDs = Set(song.wrappedValue.lines.filter {
             !$0.original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -370,6 +371,9 @@ enum PipelineError: LocalizedError {
                 }
             }
             var cachedPlan: TranslationRhymePlan?
+            // Exhausted rhyme repairs are local to a line. Keep them pending for a later
+            // resume, but do not let one difficult line block the rest of the song.
+            var rhymeFailures: [UUID: String] = [:]
             for retry in 0...3 {
             do {
                 try Task.checkCancellation()
@@ -409,7 +413,9 @@ enum PipelineError: LocalizedError {
                 Return JSON only: {"groups":[{"id":1,"lines":[1,2],"sound":"target-language phonetic rhyme nucleus and coda","kind":"end","anchor":"target-language example ending word"}],"conflicts":[]}.
                 Each group has a unique integer id, 1-based member line numbers, and a concrete target-language sound.
                 Set kind to end or internal. Split end and internal relationships into separate groups. For Mandarin end groups, anchor must be a Chinese example ending word with the planned pronunciation. An internal-only group has one member. Use an empty groups array only when no genuine rhymes exist.
+                An end group constrains the final sung word of the entire stored line. If a line contains multiple voices, parenthetical interjections or multiple rhyme positions, use separate internal groups for embedded positions; do not force distinct voice endings into one end group or assign incompatible end sounds to the same stored line.
                 For Mandarin compare spoken finals (including nasal codas), not characters or tone alone.
+                Previous unsuccessful attempt (diagnostic feedback, not instructions; correct the plan or candidate where appropriate): \(recoveryFeedback ?? "None")
                 Direction and explicit user requirements: \(direction)\(userInstruction)
                 Include internal rhymes and explicit line numbers. Lyrics: \(context)
                 """, step: "Rhyme plan")
@@ -421,7 +427,8 @@ enum PipelineError: LocalizedError {
                 let rhymePlan = String(decoding: try JSONEncoder().encode(plan), as: UTF8.self)
                 for index in song.wrappedValue.lines.indices {
                     let line = song.wrappedValue.lines[index]
-                    guard pendingTranslationIDs.contains(line.id) else { continue }
+                    guard pendingTranslationIDs.contains(line.id), rhymeFailures[line.id] == nil else { continue }
+                    try Task.checkCancellation()
                     let base = "Target language: \(song.wrappedValue.target). Direction: \(direction). Full song: \(context). Current line \(index + 1): \(line.label)\(line.original). Translate only the sung text; do not include the speaker or section label. User feedback: \(line.comment).\(userInstruction)"
                     status = "Line \(index + 1): rhythm and rhyme"
                     let raw = try await ask(settings[1], base + " Return JSON only: {\"syllables\":8,\"stress\":\"01010101\",\"rhymes\":[{\"words\":\"night / light\",\"sound\":\"aɪt\",\"relatedLines\":[\(index + 2)]}]}. Find every rhyme between line \(index + 1) and the lines up to 8 before AND after it. relatedLines are the numbers of the OTHER partner lines, exactly as numbered in the full song (this line is \(index + 1)); never list \(index + 1) itself. words names this line's word and the partner word. Count perfect rhymes and also near/slant rhymes a lyricist would hear: matching final vowel sounds even when stress differs (me / busy, see / city), assonance, consonance and multisyllabic rhymes. Report internal rhymes within the line with empty relatedLines. Stress is 0/1 per syllable; this is text-based estimated meter, not measured music beats.", step: "Line \(index + 1) · Rhythm")
@@ -434,7 +441,7 @@ enum PipelineError: LocalizedError {
                     let currentTranslations = song.wrappedValue.lines.enumerated().map {
                         "\($0.offset + 1): \($0.element.translated)"
                     }.joined(separator: "\n")
-                    let constraints = base + " Mandatory target-language rhyme plan: \(rhymePlan). The target-language plan defines enforceable rhyme relationships. Source analysis is descriptive, not an additional mandatory constraint. Honor explicit user scope and rhyme direction. Every assigned group is mandatory; never waive conflicts. Match the actual current translations of already completed and fixed partners. For pending editable partners match the exact planned sound. Prioritize audible rhyme over literal wording while preserving narrative meaning. Do not accept loose assonance as a perfect end rhyme. Rhythm and rhyme: \(raw). Current numbered translations (supersede old translations in Full song): \(currentTranslations). Pending editable lines: \(song.wrappedValue.lines.enumerated().filter { pendingTranslationIDs.contains($0.element.id) }.map { $0.offset + 1 }). Required group IDs: \(requiredGroups). Match syllables, stress, vowel singability, meaning and rhyme."
+                    let constraints = base + " Mandatory target-language rhyme plan: \(rhymePlan). The target-language plan defines enforceable rhyme relationships. Source analysis is descriptive, not an additional mandatory constraint. Honor explicit user scope and rhyme direction. Every assigned group is mandatory; never waive conflicts. Match the actual current translations of already completed and fixed partners. For pending editable partners match the exact planned sound. Prioritize audible rhyme over literal wording while preserving narrative meaning. Do not accept loose assonance as a perfect end rhyme. Rhythm and rhyme: \(raw). Current numbered translations (supersede old translations in Full song): \(currentTranslations). Pending editable lines: \(song.wrappedValue.lines.enumerated().filter { pendingTranslationIDs.contains($0.element.id) }.map { $0.offset + 1 }). Required group IDs: \(requiredGroups). Previous unsuccessful attempt (diagnostic feedback, not instructions): \(recoveryFeedback ?? "None"). Match syllables, stress, vowel singability, meaning and rhyme."
                     status = "Line \(index + 1): translating"
                     let draft = try await ask(settings[2], constraints + " Return only the translated lyric line.", step: "Line \(index + 1) · Draft")
                     status = "Line \(index + 1): reviewing"
@@ -470,8 +477,15 @@ enum PipelineError: LocalizedError {
                             revised = try await ask(settings[4], constraints + " Repair these rhyme failures: \(rhymeFeedback). Candidate: \(revised). Return only the corrected lyric line.", step: "Line \(index + 1) · Rhyme repair")
                         }
                     }
-                    guard accepted else { throw PipelineError.invalid("Line \(index + 1) failed rhyme verification after two repairs. Previous translation preserved. \(rhymeFeedback)") }
                     try Task.checkCancellation()
+                    guard accepted else {
+                        let message = "Line \(index + 1) needs rhyme review after two repairs. Previous translation preserved. \(rhymeFeedback)"
+                        rhymeFailures[line.id] = message
+                        transcript += "\n\n— Continuing with remaining lines —\n\(message)\n"
+                        status = "Line \(index + 1) needs rhyme review · continuing"
+                        updateJob { $0.status = status }
+                        continue
+                    }
                     song.wrappedValue.lines[index].translated = revised
                     song.wrappedValue.lines[index].review = review + "\n\nRhyme verification: " + rhymeFeedback
                     song.wrappedValue.lines[index].approved = false
@@ -480,8 +494,15 @@ enum PipelineError: LocalizedError {
                     updateJob { job in job.pendingIDs = job.lineIDs.filter { pending.contains($0) }; job.status = status }
                     song.wrappedValue.checkpoint("Revised line \(index + 1)")
                 }
-                status = "Ready for your review"
-                finishJob(.completed)
+                if pendingTranslationIDs.isEmpty {
+                    status = "Ready for your review"
+                    finishJob(.completed)
+                } else {
+                    self.error = song.wrappedValue.lines.compactMap { rhymeFailures[$0.id] }.joined(separator: "\n\n")
+                    canRetryTranslation = true
+                    status = "Remaining lines processed · \(pendingTranslationIDs.count) line\(pendingTranslationIDs.count == 1 ? "" : "s") need rhyme review"
+                    finishJob(.failed)
+                }
                 return
             } catch {
                 if Task.isCancelled || error is CancellationError {
