@@ -237,3 +237,10 @@ body:has(.usage-dialog[open]){overflow:hidden}
 .karaoke-line.joined .karaoke-word{font-size:clamp(20px,2.8vw,28px)}
 .karaoke-line.joined p{font-size:20px}
 @media(max-width:600px){.karaoke-line.joined p{font-size:16px}}
+
+.fullscreen-video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.karaoke-options button[aria-pressed="true"] { background: #fff; color: #111; }
+
+.karaoke-dialog.is-video .karaoke-stage { mask-image: none; }
+.karaoke-dialog.is-video:not(:has(.floating-player)) .karaoke-stage { bottom: 0; }
+@media(max-width:600px) { .karaoke-heading > div:first-child { min-width: 0; } .karaoke-heading strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .karaoke-options { flex-shrink: 0; gap: 6px; } }

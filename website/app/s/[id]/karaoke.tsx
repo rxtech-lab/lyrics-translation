@@ -18,13 +18,32 @@ export function resolve(words: Word[]) {
     return {start, end};
   });
 }
-export default function Karaoke({open, onClose, lines, getTime, onSeek, title, artist, children}: {
-  open: boolean; onClose: () => void; lines: Document['lines']; getTime: () => number; onSeek: (time: number) => void; title?: string; artist?: string; children: ReactNode;
+export default function Karaoke({open, onClose, lines, getTime, onSeek, title, artist, children, video, playing, pauseMusic, hasMusic, startWithVideo}: {
+  startWithVideo?: boolean; hasMusic?: boolean; video?: {url: string; hasAudio: boolean}; playing?: boolean; pauseMusic: () => void; open: boolean; onClose: () => void; lines: Document['lines']; getTime: () => number; onSeek: (time: number) => void; title?: string; artist?: string; children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const [present, setPresent] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [videoMode, setVideoMode] = useState(false);
+  useEffect(() => { if (open) setVideoMode(!!startWithVideo); }, [open, startWithVideo]);
+  const [videoError, setVideoError] = useState(false);
+  const videoElement = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const element = videoElement.current;
+    if (!open || !videoMode || !element) return;
+    if (video?.hasAudio || !hasMusic) { pauseMusic(); return () => element.pause(); }
+    let frame = 0;
+    const sync = () => {
+      const target = getTime();
+      if (Number.isFinite(element.duration) && Math.abs(element.currentTime - target) > .25) element.currentTime = Math.min(target, element.duration);
+      if (playing && element.paused && !element.ended) void element.play().catch(() => {});
+      if (!playing && !element.paused) element.pause();
+      frame = requestAnimationFrame(sync);
+    };
+    frame = requestAnimationFrame(sync);
+    return () => { cancelAnimationFrame(frame); element.pause(); };
+  }, [open, videoMode, video, playing, getTime, pauseMusic, hasMusic]);
   const [translation, setTranslation] = useState(false);
   const [offset, setOffset] = useState(0);
   useEffect(() => setMounted(true), []);
@@ -78,7 +97,7 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
     flow.current?.style.setProperty('--scroll', '0px');
   };
   useEffect(() => {
-    if (!open || !stage.current) return;
+    if (!open || videoMode || !stage.current) return;
     // Cache nodes once, keeping frame updates out of React reconciliation.
     const rows = groups.flatMap(group => group.items).map(item => ({
       item,
@@ -126,9 +145,9 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
     };
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
-  }, [open, groups, getTime]);
+  }, [open, groups, getTime, videoMode]);
   useEffect(() => {
-    if (!open || !stage.current) return;
+    if (!open || videoMode || !stage.current) return;
     const measure = () => {
       const item = groups.flatMap(group => group.items)[focus];
       const element = item && stage.current?.querySelector<HTMLElement>(`[data-line="${item.index}"]`);
@@ -140,12 +159,12 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
     observer.observe(stage.current);
     if (flow.current) observer.observe(flow.current);
     return () => observer.disconnect();
-  }, [open, focus, groups]);
+  }, [open, focus, groups, videoMode]);
   // Manual scrolling: shift the whole flow by a user offset, then return to the
   // playhead after a short idle period.
   useEffect(() => {
     const element = stage.current;
-    if (!open || !element) return;
+    if (!open || videoMode || !element) return;
     const state = manual.current;
     const scrollBy = (amount: number) => {
       const node = flow.current;
@@ -188,14 +207,15 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
       element.removeEventListener('touchend', onTouchEnd);
       window.clearTimeout(state.timer);
     };
-  }, [open]);
+  }, [open, videoMode]);
   const handleSeek = useMemo(() => (time: number) => { resetScroll(); seekRef.current(time); }, []);
-  return <>{!present && children}{mounted && createPortal(<dialog ref={dialog} className={`karaoke-dialog ${open ? "is-open" : "is-closing"}`} onCancel={event => { event.preventDefault(); onClose(); }} aria-label="Fullscreen lyrics">
-    <div className="karaoke-heading"><div><strong>{title || 'Linked song'}</strong><small>{artist}</small></div><div className="karaoke-options"><button onClick={() => setTranslation(!translation)}>{translation ? 'Translation' : 'Original'}</button><button onClick={onClose} aria-label="Close fullscreen lyrics"><PlayerIcon name="close"/></button></div></div>
+  return <>{!present && children}{mounted && createPortal(<dialog ref={dialog} className={`karaoke-dialog ${open ? "is-open" : "is-closing"} ${videoMode ? "is-video" : ""}`} onCancel={event => { event.preventDefault(); onClose(); }} aria-label="Fullscreen lyrics">
+    <div className="karaoke-heading"><div><strong>{title || 'Linked song'}</strong><small>{artist}</small></div><div className="karaoke-options">{video && <button aria-pressed={videoMode} onClick={() => { setVideoError(false); setVideoMode(!videoMode); }}>{videoMode ? 'Live lyrics' : 'Video'}</button>}{!videoMode && <button onClick={() => setTranslation(!translation)}>{translation ? 'Translation' : 'Original'}</button>}<button onClick={onClose} aria-label="Close fullscreen lyrics"><PlayerIcon name="close"/></button></div></div>
     <div className="karaoke-stage" ref={stage}>
-      {!groups.length ? <div className="karaoke-empty"><h2>No word timings yet</h2><p>Time the {translation ? 'translated' : 'original'} lyrics in the Mac app and publish again.</p></div> : <div className="karaoke-flow" ref={flow}><KaraokeFlow groups={groups} focus={focus} offset={offset} translation={translation} onSeek={handleSeek}/></div>}
+      {videoMode && video ? <video ref={videoElement} className="fullscreen-video" src={video.url} controls={video.hasAudio || !hasMusic} muted={!video.hasAudio} playsInline preload="metadata" onError={() => setVideoError(true)}/> : !groups.length ? <div className="karaoke-empty"><h2>No word timings yet</h2><p>Time the {translation ? 'translated' : 'original'} lyrics in the Mac app and publish again.</p></div> : <div className="karaoke-flow" ref={flow}><KaraokeFlow groups={groups} focus={focus} offset={offset} translation={translation} onSeek={handleSeek}/></div>}
     </div>
-    {present && children}
+    {videoMode && videoError && <div className="status player-status" role="alert">Video could not load. Switch to live lyrics or try again.</div>}
+    {present && !(videoMode && video?.hasAudio) && children}
   </dialog>, document.body)}</>;
 }
 

@@ -8,7 +8,8 @@ export const usageSummarySchema = z.array(z.object({
   tokens: z.number().int().nonnegative(),
   costUSD: z.number().finite().nonnegative().nullable(),
 })).max(1000);
-export const documentSchema = legacyDocumentSchema.extend({usageSummary: usageSummarySchema.optional()}).transform(({usageLog, usageSummary, ...document}) => {
+export const lyricVideoSchema = z.object({key: z.string().regex(/^lyric-videos\/[a-f0-9]{64}\/[a-f0-9-]{36}\.mp4$/), hasAudio: z.boolean()});
+export const documentSchema = legacyDocumentSchema.extend({usageSummary: usageSummarySchema.optional(), lyricVideo: lyricVideoSchema.optional()}).transform(({usageLog, usageSummary, ...document}) => {
   const agents = new Map<string, {agent: string; tokens: number; costUSD: number | null}>();
   for (const record of (usageLog ?? []).flatMap(session => session.records)) {
     const name = record.agent || 'Other';

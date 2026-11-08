@@ -63,12 +63,14 @@ struct LyricVideoScript: Codable, Identifiable {
     var source = ""
     /// Agent-owned files under src/, keyed by relative path, e.g. "video.tsx".
     var files: [String: String]?
+    /// Generated raster layers, keyed by filename under public/scenes/.
+    var assets: [String: Data]?
     var style: String
     var agent: String
     var created = Date()
 
-    init(track: String, files: [String: String], style: String, agent: String) {
-        self.track = track; self.files = files; self.style = style; self.agent = agent
+    init(track: String, files: [String: String], assets: [String: Data]? = nil, style: String, agent: String) {
+        self.track = track; self.files = files; self.assets = assets; self.style = style; self.agent = agent
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -76,6 +78,7 @@ struct LyricVideoScript: Codable, Identifiable {
         track = try c.decode(String.self, forKey: .track)
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
         files = try c.decodeIfPresent([String: String].self, forKey: .files)
+        assets = try c.decodeIfPresent([String: Data].self, forKey: .assets)
         style = try c.decodeIfPresent(String.self, forKey: .style) ?? "Director’s cut"
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? ""
         created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()

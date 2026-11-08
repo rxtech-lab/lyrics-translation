@@ -12,3 +12,4 @@ xcuserdata/
 # Python bytecode
 __pycache__/
 *.py[cod]
+.build

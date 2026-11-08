@@ -3,6 +3,7 @@ import {identity,sameOrigin,authenticatedProfile} from '@/lib/auth';
 import {db,init} from '@/lib/db';
 import {documentSchema} from '@/lib/document';
 import {z} from 'zod';
+import {validateVideo} from '@/lib/video-storage';
 
 const publicationKey = (owner: string, id: string) => createHash('sha256').update(JSON.stringify([owner,id])).digest('hex');
 const documentID = z.string().uuid();
@@ -14,8 +15,8 @@ export async function GET(r: Request) {
   try {
     const id = documentID.parse(new URL(r.url).searchParams.get('documentId'));
     await init();
-    const {rows} = await db().execute({sql:'SELECT share FROM publications WHERE owner=? AND document_id=?', args:[owner,id]});
-    return Response.json({url: rows.length ? shareURL(String(rows[0].share), r) : null}, {headers:{'Cache-Control':'no-store'}});
+    const {rows} = await db().execute({sql:'SELECT p.share, s.document FROM publications p JOIN shares s ON s.id=p.share WHERE p.owner=? AND p.document_id=?', args:[owner,id]});
+    return Response.json({url: rows.length ? shareURL(String(rows[0].share), r) : null, lyricVideo: rows.length ? JSON.parse(String(rows[0].document)).lyricVideo ?? null : null}, {headers:{'Cache-Control':'no-store'}});
   } catch { return new Response('Invalid status request', {status:400}); }
 }
 
@@ -43,6 +44,10 @@ export async function POST(r:Request) {
     const raw=await r.text();
     if(Buffer.byteLength(raw)>1000000)return new Response('Document too large',{status:413});
     const data=z.object({documentId:documentID.optional(),title:z.string().trim().min(1).max(180),document:documentSchema}).parse(JSON.parse(raw));
+    if (data.document.lyricVideo) {
+      if (!data.documentId) return new Response('Video requires a document ID', {status:400});
+      await validateVideo(owner, data.documentId, data.document.lyricVideo.key);
+    }
     await init();
     const id=data.documentId ? publicationKey(owner,data.documentId) : crypto.randomUUID();
     await db().batch([

@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import RxAgentSDK
 import RxRemotion
 
@@ -7,7 +8,7 @@ import RxRemotion
 /// Layout: `src/index.tsx` (app entry) and `src/song.json` (timings) belong to the app; everything else under
 /// `src/` belongs to the agent, with `src/video.tsx` exporting the root `Video` component.
 @MainActor final class VideoWorkspace {
-    nonisolated static let toolNames: Set<String> = ["list_files", "read_file", "write_file", "edit_file", "delete_file", "check_video"]
+    nonisolated static let toolNames: Set<String> = ["list_files", "read_file", "write_file", "edit_file", "delete_file", "import_image", "check_video"]
     static let reserved: Set<String> = ["index.tsx", "song.json"]
     static let extensions: Set<String> = ["tsx", "ts", "jsx", "js", "css"]
     private static let maxFileSize = 200_000, maxFiles = 24
@@ -19,10 +20,12 @@ import RxRemotion
     private(set) var checks = 0
     private let engine = RemotionEngine()
     private let probeFrame: Int
+    private let requiresArtwork: Bool
 
-    init(root: URL, probeFrame: Int) {
+    init(root: URL, probeFrame: Int, requiresArtwork: Bool = false) {
         self.root = root.resolvingSymlinksInPath()
         self.probeFrame = probeFrame
+        self.requiresArtwork = requiresArtwork
     }
 
     func close() { engine.closeAll() }
@@ -51,6 +54,72 @@ import RxRemotion
         }
     }
 
+    /// Images live outside src/ so Remotion can wait for them using Img + staticFile.
+    var assetDirectory: URL { root.appendingPathComponent("public/scenes", isDirectory: true) }
+
+    func assets() throws -> [String: Data] {
+        guard FileManager.default.fileExists(atPath: assetDirectory.path) else { return [:] }
+        var result: [String: Data] = [:]
+        for url in try FileManager.default.contentsOfDirectory(at: assetDirectory, includingPropertiesForKeys: nil) {
+            guard Self.validAssetName(url.lastPathComponent) else { continue }
+            let resolved = url.resolvingSymlinksInPath()
+            guard resolved.deletingLastPathComponent() == assetDirectory.resolvingSymlinksInPath() else {
+                throw PipelineError.invalid("Scene assets must stay in public/scenes/.")
+            }
+            result[url.lastPathComponent] = try Data(contentsOf: resolved)
+        }
+        return result
+    }
+
+    static func validAssetName(_ name: String) -> Bool {
+        !name.isEmpty && !name.hasPrefix(".") &&
+        name.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) } &&
+        ["png", "jpg", "jpeg", "webp"].contains(URL(fileURLWithPath: name).pathExtension.lowercased())
+    }
+
+    static func writeAssets(_ assets: [String: Data], to root: URL) throws {
+        let directory = root.appendingPathComponent("public/scenes", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for (name, data) in assets {
+            guard validAssetName(name) else { throw PipelineError.invalid("Invalid scene asset filename.") }
+            let destination = directory.appendingPathComponent(name).resolvingSymlinksInPath()
+            guard destination.deletingLastPathComponent() == directory.resolvingSymlinksInPath() else {
+                throw PipelineError.invalid("Scene assets must stay in public/scenes/.")
+            }
+            try data.write(to: destination, options: .atomic)
+        }
+    }
+
+    private func importImage(source: String, name: String) -> AgentToolResult {
+        do {
+            guard Self.validAssetName(name) else { return .error("Use a filename such as scene-01-background.png (PNG, JPEG or WebP).") }
+            let sourceURL = URL(fileURLWithPath: source, relativeTo: root).standardizedFileURL.resolvingSymlinksInPath()
+            let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"].map { URL(fileURLWithPath: $0) }
+                ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+            let generated = codexHome.appendingPathComponent("generated_images").resolvingSymlinksInPath()
+            guard [root, generated].contains(where: { sourceURL.path.hasPrefix($0.path + "/") }) else {
+                return .error("Import only generated images from this project or CODEX_HOME/generated_images/. Pass the image tool's saved local path.")
+            }
+            let size = (try sourceURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]))
+            guard size.isRegularFile == true, let bytes = size.fileSize, bytes <= 20_000_000 else {
+                return .error("Each scene layer must be a regular image file under 20 MB.")
+            }
+            let data = try Data(contentsOf: sourceURL)
+            guard let image = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(image) == 1,
+                  CGImageSourceCreateImageAtIndex(image, 0, nil) != nil else {
+                return .error("The generated file is not a supported still image.")
+            }
+            let saved = try assets()
+            guard saved[name] == nil else { return .error("That layer already exists. Import a new version with a different filename.") }
+            guard saved.count < 80, saved.values.reduce(data.count, { $0 + $1.count }) <= 256_000_000 else {
+                return .error("Scene artwork is limited to 80 layers and 256 MB per video; reuse existing layers.")
+            }
+            onActivity?("Saving scene layer \(name)")
+            try Self.writeAssets([name: data], to: root)
+            return .text("Saved public/scenes/\(name). Render with <Img src={staticFile('scenes/\(name)')} /> from remotion. The app preserves this layer for reopening, revisions and export.")
+        } catch { return .error(error.localizedDescription) }
+    }
+
     /// Maps an agent path ("video.tsx", "src/parts/Title.tsx") into src/, refusing escapes and app-owned files.
     private func resolve(_ raw: String, writing: Bool) throws -> URL {
         var path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -76,6 +145,14 @@ import RxRemotion
         checks += 1
         engine.close(projectURL: root)
         do {
+            if requiresArtwork {
+                guard try assets().count >= 3 else {
+                    return "Anime Layers requires generated raster artwork: import the environment, transparent character and foreground layers with import_image. Use native Codex image generation; do not substitute SVG scenery or people. If it is unavailable, report the limitation."
+                }
+                guard FileManager.default.fileExists(atPath: src.appendingPathComponent("scenes.ts").path) else {
+                    return "Create src/scenes.ts with the lyric-timed scene plan and layer filenames (rule 18)."
+                }
+            }
             guard FileManager.default.fileExists(atPath: src.appendingPathComponent("video.tsx").path) else {
                 return "src/video.tsx does not exist. Create it and export the root component: export const Video = () => …"
             }
@@ -102,10 +179,13 @@ import RxRemotion
                 await self.list()
             },
             .dynamic(name: "read_file",
-                     description: "Read a file from src/ (including song.json, the timing data).",
-                     inputSchema: ["type": "object", "properties": ["path": path], "required": ["path"]],
+                     description: "Read a file from src/ with line numbers. Long files come back in pages; pass offset (1-based line) to continue. song.json returns a short sample because its shape and all lyrics are already in your brief.",
+                     inputSchema: ["type": "object", "properties": [
+                        "path": path,
+                        "offset": ["type": "integer", "description": "First line to return (1-based). Defaults to 1."]
+                     ], "required": ["path"]],
                      annotations: .readOnly) { [self] arguments, _ in
-                await self.read(arguments["path"]?.stringValue ?? "")
+                await self.read(arguments["path"]?.stringValue ?? "", offset: arguments["offset"]?.intValue ?? 1)
             },
             .dynamic(name: "write_file",
                      description: "Create or replace a file in src/ with the full content. Use it to create files; prefer edit_file for changes to existing files.",
@@ -132,6 +212,14 @@ import RxRemotion
                      annotations: .destructive) { [self] arguments, _ in
                 await self.delete(arguments["path"]?.stringValue ?? "")
             },
+            .dynamic(name: "import_image",
+                     description: "Copy a generated raster layer into public/scenes/ for durable preview and export. Call the native Codex image generation tool first, then pass its saved local path. Never send base64. Use transparent PNG for characters and foreground objects.",
+                     inputSchema: ["type": "object", "properties": [
+                        "source_path": ["type": "string", "description": "Local path returned by native image generation."],
+                        "name": ["type": "string", "description": "Unique scene-layer filename, e.g. scene-01-character.png."]
+                     ], "required": ["source_path", "name"]]) { [self] arguments, _ in
+                await self.importImage(source: arguments["source_path"]?.stringValue ?? "", name: arguments["name"]?.stringValue ?? "")
+            },
             .dynamic(name: "check_video",
                      description: "Compile the project and test-render a frame during the first sung line. Returns OK or the compiler/runtime error. Call it after your edits and keep fixing until it returns OK.",
                      inputSchema: ["type": "object", "properties": [:]],
@@ -151,15 +239,49 @@ import RxRemotion
             let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
             return "src/\(name) · \(size) bytes\(Self.reserved.contains(name) ? " · read-only" : "")"
         }
-        return .text(rows.isEmpty ? "src/ is empty." : rows.joined(separator: "\n"))
+        let images = ((try? assets()) ?? [:]).keys.sorted().map { "public/scenes/\($0) · image" }
+        return .text((rows + images).isEmpty ? "Project is empty." : (rows + images).joined(separator: "\n"))
     }
 
-    private func read(_ raw: String) -> AgentToolResult {
+    /// Characters per read_file page. Claude Code rejects tool results over ~25k tokens and the agent then
+    /// stalls trying to work around it, so every result stays well under that.
+    private static let readPageSize = 40_000
+
+    private func read(_ raw: String, offset: Int) -> AgentToolResult {
         do {
             let url = try resolve(raw, writing: false)
             onActivity?("Reading \(url.lastPathComponent)")
-            return .text(try String(contentsOf: url, encoding: .utf8))
+            let text = try String(contentsOf: url, encoding: .utf8)
+            if relative(url) == "song.json" { return .text(Self.songSample(text)) }
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            let start = max(1, offset)
+            guard start <= max(1, lines.count) else { return .error("src/\(relative(url)) has only \(lines.count) lines.") }
+            var page = "", line = start
+            while line <= lines.count {
+                let row = "\(line)\t\(lines[line - 1].prefix(2_000))\n"
+                if !page.isEmpty && page.count + row.count > Self.readPageSize { break }
+                page += row; line += 1
+            }
+            if line <= lines.count { page += "… \(lines.count - line + 1) more lines. Call read_file with offset \(line) to continue." }
+            return .text(page)
         } catch { return .error("Cannot read \(raw): \(error.localizedDescription)") }
+    }
+
+    /// Top-level fields plus the first two lines of song.json (the full file is ~60 KB on one line).
+    private static func songSample(_ text: String) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+            return "song.json follows the DATA CONTRACT in your brief."
+        }
+        let lines = json["lines"] as? [[String: Any]] ?? []
+        var sample = json
+        sample["lines"] = Array(lines.prefix(2))
+        let body = (try? JSONSerialization.data(withJSONObject: sample, options: [.prettyPrinted, .sortedKeys]))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        return """
+        song.json is large (\(text.utf8.count / 1000) KB, \(lines.count) lines), so this is a sample: every top-level field and the first \(min(2, lines.count)) lines. \
+        The rest follows the same DATA CONTRACT, and every lyric with its start time is in your brief. Import it; do not try to read it in full.
+        \(body)
+        """
     }
 
     private func writeTool(_ raw: String, _ content: String) -> AgentToolResult {
@@ -218,11 +340,17 @@ struct VideoToolPermissions: PermissionResolving {
 
     func resolve(_ request: PermissionRequest) async -> PermissionDecision {
         if VideoWorkspace.toolNames.contains(MCPToolName.bare(request.toolName)) { return .allow }
+        // Only the native image tool, never a shell or arbitrary external image service.
+        if ["imagegen", "image_gen", "image_generation"].contains(MCPToolName.bare(request.toolName)) { return .allow }
         guard request.toolName != "Bash", request.toolInput["command"] == nil,
               let data = try? JSONEncoder().encode(request.toolInput),
               let text = String(data: data, encoding: .utf8) else { return .deny }
         // Codex routes MCP tool approval through a generic request that names this app's tool server.
         if text.contains(LocalToolServer.serverName) || VideoWorkspace.toolNames.contains(where: { text.contains($0) }) { return .allow }
+        // Codex asks before applying a patch with only item ids (no paths). Its workspace-write sandbox already confines
+        // writes to the project folder, which is its working directory, so allow those unless it asks to widen the root.
+        if request.toolInput["itemId"] != nil, request.toolInput["serverName"] == nil,
+           request.toolInput["grantRoot"]?.stringValue == nil { return .allow }
         let paths = ["file_path", "path", "notebook_path"].compactMap { request.toolInput[$0]?.stringValue }
         let inside = !paths.isEmpty && paths.allSatisfy { path in
             let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
