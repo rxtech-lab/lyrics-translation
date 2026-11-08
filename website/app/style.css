@@ -177,13 +177,15 @@ body:has(.usage-dialog[open]){overflow:hidden}
 .meter-legend i{width:13px;height:13px;border-radius:3px}
 .meter-legend i.is-stressed{background:#3b82f6}
 .analysis-empty{margin:0;color:#a7b3c6;font-size:14px;line-height:1.5}
-.rhyme-card ul{list-style:none;margin:0;padding:0}
-.rhyme-card li{display:flex;align-items:center;gap:12px;padding:11px 8px;margin:0 -8px;border-radius:10px;border-bottom:1px solid #ffffff12;transition:background .15s}
+.rhyme-card{display:flex;flex-direction:column;max-height:min(420px,60dvh);min-height:0;overflow:hidden}
+.rhyme-card .analysis-card-head{flex-shrink:0}
+.rhyme-card ul{list-style:none;margin:0 -8px;padding:0 8px;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.rhyme-card li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px 12px;padding:11px 8px;margin:0 -8px;border-radius:10px;border-bottom:1px solid #ffffff12;transition:background .15s}
 .rhyme-card li:last-child{border-bottom:0}
 .rhyme-card li:hover,.rhyme-card li.is-active{background:color-mix(in srgb,var(--rhyme) 14%,transparent)}
-.rhyme-card code{color:var(--rhyme);font-size:15px;min-width:44px}
+.rhyme-card code{grid-column:1/-1;color:var(--rhyme);font-size:15px;min-width:0;white-space:normal;overflow-wrap:anywhere}
 .rhyme-words{flex:1;min-width:0;overflow-wrap:anywhere}
-.rhyme-lines{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.rhyme-lines{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:110px}
 .rhyme-lines a{font-size:11px;padding:3px 7px;border-radius:999px;border:1px solid #ffffff24;color:#c9d6ea}
 .rhyme-lines a:hover,.rhyme-lines a:focus-visible{border-color:var(--rhyme);color:#fff}
 @media(max-width:900px){.lyrics article.has-analysis{padding-right:0}.line-analysis{right:auto;left:0;top:calc(100% - 10px);width:min(560px,100%)}.line-analysis{transform:translateY(-6px)}.lyrics article.is-analysis-open .line-analysis,.lyrics article:focus-within .line-analysis{transform:none}.line-analysis:before{inset:-14px 0 auto;width:auto;height:14px}}
@@ -230,3 +232,8 @@ body:has(.usage-dialog[open]){overflow:hidden}
 @media(max-width:700px){.album-list-songs{padding-left:0}}@media(prefers-reduced-motion:reduce){.album-list-chevron{transition:none}}
 .translation-list-language{flex-shrink:0;min-width:84px;padding:5px 10px;border:1px solid #8fbdff25;border-radius:6px;background:#8fbdff10;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.translation-list .song-list-title>a{font-size:16px;font-weight:500}.translation-list-likes{flex-shrink:0;font-size:13px;color:#d6e8ff;font-variant-numeric:tabular-nums}.translation-list .song-list-status{min-width:90px}
 @media(max-width:700px){.translation-list-language{min-width:0}.translation-list .song-list-status{display:none}}
+
+/* Later overlapping vocals use the smaller macOS backing-vocal treatment. */
+.karaoke-line.joined .karaoke-word{font-size:clamp(20px,2.8vw,28px)}
+.karaoke-line.joined p{font-size:20px}
+@media(max-width:600px){.karaoke-line.joined p{font-size:16px}}
