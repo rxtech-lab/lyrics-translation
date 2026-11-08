@@ -22,7 +22,8 @@ declare global { interface Window { MusicKit: {configure: (c: unknown) => Promis
 const seconds = (value: number) => Number.isFinite(value) ? Math.max(0, value) : 0;
 const clock = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
 
-export default function Player({id, song, title, artist, lines, initialStarred, initialStars, tokenCount, usageSummary, children, video}: {video?: {url: string; hasAudio: boolean}; children?: ReactNode; initialStarred:boolean; initialStars:number; tokenCount:number; usageSummary?:Document['usageSummary']; lines: Document["lines"]; id: string; song?: string; title?: string; artist?: string}) {
+export default function Player({id, song, title, artist, artworkURL, lines, initialStarred, initialStars, tokenCount, usageSummary, children, video}: {video?: {url: string; hasAudio: boolean}; children?: ReactNode; initialStarred:boolean; initialStars:number; tokenCount:number; usageSummary?:Document['usageSummary']; lines: Document["lines"]; id: string; song?: string; title?: string; artist?: string; artworkURL?: string | null}) {
+  const [failedArtwork, setFailedArtwork] = useState<string | null>(null);
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [starred, setStarred] = useState(initialStarred);
   const [stars, setStars] = useState(initialStars);
@@ -135,7 +136,7 @@ export default function Player({id, song, title, artist, lines, initialStarred, 
     }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.5 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.6l6.3-.9Z"/></svg>{savingStar ? 'Saving…' : starred ? 'Starred' : 'Star translation'}<span className="star-count" aria-live="polite">{stars}</span></button><UsageDialog count={tokenCount} summary={usageSummary}/>{children}<span className="translation-actions-note">Made with LyricStudio</span></div>
     {(song || video) && <Karaoke startWithVideo={!song} hasMusic={!!song} video={video} playing={playing} pauseMusic={pauseMusic} open={expanded} onClose={() => setExpanded(false)} lines={lines} getTime={getPlaybackTime} onSeek={seek} title={title} artist={artist}><section className="floating-player" aria-label={song ? "Apple Music player" : "Lyric video player"} aria-busy={busy}>
       <div className="player-top">
-        <div className="player-art" aria-hidden="true"><PlayerIcon name="music"/></div>
+        <div className="player-art" aria-hidden="true">{artworkURL && failedArtwork !== artworkURL ? <img src={artworkURL} alt="" width={56} height={56} onError={() => setFailedArtwork(artworkURL)}/> : <PlayerIcon name="music"/>}</div>
         <div className="floating-player-song"><span className="eyebrow">{song ? 'APPLE MUSIC' : 'LYRIC VIDEO'}</span><strong>{title || (song ? 'Linked song' : 'Lyric video')}</strong>{artist && <small>{artist}</small>}</div>
         <div className="player-controls">
           <button className="expand-control" aria-label={expanded ? "Close fullscreen lyrics" : "Open fullscreen lyrics"} onClick={() => setExpanded(!expanded)}><PlayerIcon name={expanded ? "collapse" : "expand"}/></button>

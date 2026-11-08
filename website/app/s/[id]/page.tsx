@@ -24,7 +24,7 @@ export default async function Shared({params,searchParams}:{params:Promise<{id:s
       </dl>
       <a href={d.appleMusic.url || `https://music.apple.com/song/${d.appleMusic.id}`} target="_blank" rel="noopener noreferrer">Listen on Apple Music ↗</a>
     </section>}
-    <Player video={d.lyricVideo ? {url: videoURL(d.lyricVideo.key), hasAudio: d.lyricVideo.hasAudio} : undefined} initialStarred={starred} initialStars={Number(r.stars)} tokenCount={tokens(d)} usageSummary={d.usageSummary} lines={d.lines} id={id} song={d.appleMusic?.id} title={d.appleMusic?.title} artist={d.appleMusic?.artist}><ShareLines lines={d.lines} target={d.target} title={d.appleMusic?.title || String(r.title)}/></Player>
+    <Player video={d.lyricVideo ? {url: videoURL(d.lyricVideo.key), hasAudio: d.lyricVideo.hasAudio} : undefined} initialStarred={starred} initialStars={Number(r.stars)} tokenCount={tokens(d)} usageSummary={d.usageSummary} lines={d.lines} id={id} song={d.appleMusic?.id} title={d.appleMusic?.title} artist={d.appleMusic?.artist} artworkURL={d.appleMusic?.artworkURL}><ShareLines lines={d.lines} target={d.target} title={d.appleMusic?.title || String(r.title)}/></Player>
     <section className="translation-reading" aria-label="Lyrics and translation">
       <div className="translation-columns"><span>LYRICS · {d.target.toUpperCase()} TRANSLATION</span></div>
       <AnalyzedLyrics lines={d.lines} highlighted={[...highlighted]}/>
