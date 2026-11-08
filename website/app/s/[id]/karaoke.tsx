@@ -1,5 +1,6 @@
 "use client";
 import PlayerIcon from './player-icon';
+import {focusLine} from './karaoke-focus';
 import {memo, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import type {Document} from '@/lib/document';
@@ -44,17 +45,23 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
       const words = (translation ? line.translationTiming : line.originalTiming) ?? [];
       const ranges = resolve(words);
       const timed = ranges.filter(r => r !== null);
-      return {line, index, words, ranges, right: !!line.speaker && speakers.indexOf(line.speaker) % 2 === 1,
+      return {line, index, words, ranges, joined: false, right: !!line.speaker && speakers.indexOf(line.speaker) % 2 === 1,
         start: timed.length ? Math.min(...timed.map(r => r.start)) : Infinity,
         end: timed.length ? Math.max(...timed.map(r => r.end)) : Infinity};
     }).filter(l => Number.isFinite(l.start)).sort((a,b) => a.start - b.start || a.index - b.index);
+    // Match macOS: ignore brief handoffs; backing vocals overlap an earlier
+    // line by at least one second, or half their own duration when shorter.
+    items.forEach((item, position) => {
+      const needed = Math.min(1, (item.end - item.start) * .5);
+      item.joined = items.slice(0, position).some(other =>
+        Math.min(item.end, other.end) - Math.max(item.start, other.start) >= needed);
+    });
     const result: {start:number; end:number; items:typeof items}[] = [];
     for (const item of items) {
       const last = result.at(-1);
       if (last && item.start < last.end) { last.items.push(item); last.end = Math.max(last.end, item.end); }
       else result.push({start:item.start, end:item.end, items:[item]});
     }
-    result.forEach(g => g.items.sort((a,b) => a.index-b.index));
     return result;
   }, [lines, translation]);
   const [focus, setFocus] = useState(0);
@@ -82,6 +89,7 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
       state: '',
     }));
     rows.forEach(row => { row.fills = row.words.map(word => word.firstElementChild as HTMLElement); });
+    const spans = rows.map(row => row.item);
     let frame = 0;
     let previousTime = -1;
     let previousFocus = -1;
@@ -89,11 +97,11 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
       const time = getTime();
       if (time !== previousTime) {
         previousTime = time;
-        const next = Math.max(0, groups.findLastIndex(g => g.start <= time + .25));
+        const next = focusLine(spans, time);
         if (next !== previousFocus) { previousFocus = next; setFocus(next); }
         for (const row of rows) {
           const {item, node, words, fills, progress} = row;
-          const state = time >= item.end ? 'past' : time >= item.start ? 'current' : '';
+          const state = time >= item.end ? 'past' : time + .5 >= item.start ? 'current' : '';
           if (state !== row.state) {
             row.state = state;
             node.classList.toggle('current', state === 'current');
@@ -122,12 +130,15 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
   useEffect(() => {
     if (!open || !stage.current) return;
     const measure = () => {
-      const element = stage.current?.querySelector<HTMLElement>(`[data-group="${focus}"]`);
-      if (element) setOffset(element.offsetTop);
+      const item = groups.flatMap(group => group.items)[focus];
+      const element = item && stage.current?.querySelector<HTMLElement>(`[data-line="${item.index}"]`);
+      // The line's offset parent is its positioned group, so include both offsets.
+      if (element) setOffset(element.offsetTop + (element.offsetParent as HTMLElement).offsetTop);
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(stage.current);
+    if (flow.current) observer.observe(flow.current);
     return () => observer.disconnect();
   }, [open, focus, groups]);
   // Manual scrolling: shift the whole flow by a user offset, then return to the
@@ -188,12 +199,14 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
   </dialog>, document.body)}</>;
 }
 
-type Group = {start:number; end:number; items:{line: Document['lines'][number]; index:number; words:Word[]; right:boolean; start:number}[]};
+type Group = {start:number; end:number; items:{line: Document['lines'][number]; index:number; words:Word[]; joined:boolean; right:boolean; start:number}[]};
 // Memoized so the parent's frequent re-renders (playback position polling) don't
 // reconcile every lyric word.
 const KaraokeFlow = memo(function KaraokeFlow({groups, focus, offset, translation, onSeek}: {groups: Group[]; focus: number; offset: number; translation: boolean; onSeek: (time: number) => void}) {
-  return <>{groups.map((group, index) => <div key={index} data-group={index} className="karaoke-group" style={{transform:`translate3d(0,${-offset}px,0)`, transitionDelay:`${Math.min(.3, Math.max(0,index-focus)*.05)}s`}}>{group.items.map(item =>
-    <button key={item.index} data-line={item.index} className={`karaoke-line ${item.right ? 'right' : ''}`} onClick={() => onSeek(Math.max(0,item.start-.25))}>
+  const focusedItem = groups.flatMap(group => group.items)[focus];
+  const focusedGroup = groups.findIndex(group => group.items.includes(focusedItem));
+  return <>{groups.map((group, index) => <div key={index} data-group={index} className="karaoke-group" style={{transform:`translate3d(0,${-offset}px,0)`, transitionDelay:`${Math.min(.3, Math.max(0,index-focusedGroup)*.05)}s`}}>{group.items.map(item =>
+    <button key={item.index} data-line={item.index} className={`karaoke-line ${item.right ? 'right' : ''} ${item.joined ? 'joined' : ''}`} onClick={() => onSeek(Math.max(0,item.start-.25))}>
       <small>{[item.line.section,item.line.speaker].filter(Boolean).join(' · ')}</small>
       <div>{item.words.map((word,i) => <span key={i} className="karaoke-word">{word.text}<span aria-hidden="true" style={{clipPath:'inset(0 100% 0 0)'}}>{word.text}</span>{word.space ? '\u00a0' : ''}</span>)}</div>
       <p>{translation ? item.line.original : item.line.translated}</p>
