@@ -8,4 +8,6 @@ Native bearer authentication is required for all publishing requests.
 
 Published pages resolve the key against the configured media origin. Fullscreen playback can switch between live lyrics and video; silent videos follow the Apple Music clock, while videos containing audio use native video controls and pause Apple Music.
 
+For S3-compatible storage, an `S3_ENDPOINT` path is preserved by signed uploads. When `S3_VIDEO_PUBLIC_URL` is just an origin, playback includes that endpoint path too: an endpoint ending in `/lyrics-studio` produces public URLs ending in `/lyrics-studio/lyric-videos/…`. An explicit path in `S3_VIDEO_PUBLIC_URL` takes precedence and is used once. For new bucket-root setups, use an endpoint without a path; keep existing paths for already uploaded media.
+
 Video bytes never pass through the web server. Failed and superseded uploads may be left in S3; configure storage retention/cleanup for unreferenced objects. Unpublishing removes the page, but does not revoke previously copied public media URLs.

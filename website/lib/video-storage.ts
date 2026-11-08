@@ -15,8 +15,14 @@ function storage() {
 export function videoURL(key: string) {
   const base = process.env.S3_VIDEO_PUBLIC_URL;
   if (!base) throw Error('Video storage is not configured');
-  const url = new URL(`${base.replace(/\/$/, '')}/${key}`);
+  const url = new URL(base);
   if (url.protocol !== 'https:') throw Error('Video storage requires HTTPS');
+  // The SDK preserves an endpoint's path when signing uploads. With a
+  // bucket-root CDN, that path is therefore also part of the public object key.
+  // An explicit public base path takes precedence (and must not be doubled).
+  const prefix = url.pathname.replace(/\/+$/, '') ||
+    (process.env.S3_ENDPOINT ? new URL(process.env.S3_ENDPOINT).pathname.replace(/\/+$/, '') : '');
+  url.pathname = `${prefix}/${key}`;
   return url.href;
 }
 export async function createVideoUpload(owner: string, documentId: string, size: number) {
