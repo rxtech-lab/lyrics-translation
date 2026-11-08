@@ -8,6 +8,8 @@ import RxAuthSwiftUI
 struct ShareLyricsSheet: View {
     @Binding var song: Song
     let title: String
+    var initialVideoURL: URL? = nil
+    var initialVideoHasAudio = false
     var initialLineIDs: Set<UUID>? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var excerpt = false
@@ -18,6 +20,12 @@ struct ShareLyricsSheet: View {
     @State private var status: String?
     @State private var sharedURL: URL?
     @State private var copied = false
+    private struct PublishedVideo: Codable { let key: String; let hasAudio: Bool }
+    @State private var publishedVideo: PublishedVideo?
+    @State private var videoFile: URL?
+    @State private var includeVideo = true
+    @State private var videoHasAudio = false
+    @State private var importingVideo = false
     @State private var manager: OAuthManager?
     @State private var signInSession: SignInSession?
     private struct SignInSession: Identifiable {
@@ -93,6 +101,16 @@ struct ShareLyricsSheet: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section {
+                    Toggle("Include Lyric Video", isOn: $includeVideo).disabled(busy)
+                    if includeVideo {
+                        Button(videoFile?.lastPathComponent ?? (publishedVideo == nil ? "Choose Exported MP4…" : "Replace Published Video…")) { importingVideo = true }.disabled(busy)
+                        if videoFile != nil { Toggle("Video Contains Audio", isOn: $videoHasAudio).disabled(busy) }
+                    }
+                } header: { Text("Lyric Video") } footer: {
+                    Text("Export an MP4 from Lyric Video, then include it here. Silent videos play with Apple Music in fullscreen. Only share audio you have permission to publish.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section {
                     Button { excerpt = true } label: {
                         HStack {
                             Label("Share Lyric Lines as Image", systemImage: "photo.on.rectangle.angled")
@@ -127,9 +145,18 @@ struct ShareLyricsSheet: View {
         }
         .frame(minWidth: 580, minHeight: 620)
         .task {
+            videoFile = initialVideoURL
+            videoHasAudio = initialVideoHasAudio
             if song.publicationID == nil { song.publicationID = UUID() }
             signedIn = storage.getAccessToken() != nil
             if signedIn { await checkPublication() }
+        }
+        .interactiveDismissDisabled(busy)
+        .fileImporter(isPresented: $importingVideo, allowedContentTypes: [.mpeg4Movie]) { result in
+            switch result {
+            case .success(let url): videoFile = url
+            case .failure(let error): status = error.localizedDescription
+            }
         }
         .sheet(isPresented: $excerpt) { LyricImageShareSheet(song: song, title: title, publishedURL: sharedURL) }
         .confirmationDialog("Unpublish this translation?", isPresented: $confirmUnpublish) {
@@ -289,8 +316,10 @@ struct ShareLyricsSheet: View {
                 return
             }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ShareError.failed }
-            struct Reply: Decodable { let url: URL? }
-            sharedURL = try JSONDecoder().decode(Reply.self, from: data).url
+            struct Reply: Decodable { let url: URL?; let lyricVideo: PublishedVideo? }
+            let reply = try JSONDecoder().decode(Reply.self, from: data)
+            sharedURL = reply.url
+            publishedVideo = reply.lyricVideo
             loaded = true
             if unpublish { status = "Translation unpublished." }
         } catch {
@@ -310,6 +339,12 @@ struct ShareLyricsSheet: View {
                 catch { signedIn = false; signInSession = SignInSession(manager: auth); return }
             }
             guard let token = storage.getAccessToken() else { throw ShareError.configuration }
+            if includeVideo, let videoFile {
+                activity = "Uploading lyric video…"
+                publishedVideo = try await uploadVideo(videoFile, token: token)
+                self.videoFile = nil
+            }
+            activity = sharedURL == nil ? "Publishing…" : "Updating publication…"
             let encodedLines = try JSONEncoder().encode(song.lines)
             let lines = try JSONSerialization.jsonObject(with: encodedLines)
             let encoder = JSONEncoder()
@@ -323,6 +358,7 @@ struct ShareLyricsSheet: View {
                         "costUSD": costs.allSatisfy { $0 != nil } ? costs.compactMap { $0 }.reduce(0, +) as Any : NSNull()]
             }
             var document: [String: Any] = ["target": song.target, "lines": lines, "usageSummary": usage]
+            if includeVideo, let publishedVideo { document["lyricVideo"] = try JSONSerialization.jsonObject(with: encoder.encode(publishedVideo)) }
             if let music = song.appleMusic { document["appleMusic"] = try JSONSerialization.jsonObject(with: encoder.encode(music)) }
             let data = try JSONSerialization.data(withJSONObject: ["documentId": song.publicationID!.uuidString, "title": title.isEmpty ? "Untitled translation" : title, "document": document])
             guard data.count <= 1_000_000 else { throw ShareError.tooLarge }
@@ -338,9 +374,34 @@ struct ShareLyricsSheet: View {
             status = "Translation published."
         } catch { status = error.localizedDescription }
     }
+    private func uploadVideo(_ file: URL, token: String) async throws -> PublishedVideo {
+        let scoped = file.startAccessingSecurityScopedResource()
+        defer { if scoped { file.stopAccessingSecurityScopedResource() } }
+        let values = try file.resourceValues(forKeys: [.fileSizeKey])
+        guard let size = values.fileSize, size > 0, size <= 2_147_483_648 else { throw ShareError.videoSize }
+        guard let endpoint = URL(string: server + "/api/shares/video-upload"), let id = song.publicationID else { throw ShareError.configuration }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["documentId": id.uuidString, "size": size])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ShareError.failed }
+        struct Upload: Decodable { let uploadURL: URL; let key: String }
+        let upload = try JSONDecoder().decode(Upload.self, from: data)
+        guard upload.uploadURL.scheme == "https" else { throw ShareError.configuration }
+        var put = URLRequest(url: upload.uploadURL)
+        put.httpMethod = "PUT"
+        put.timeoutInterval = 3600
+        put.setValue("video/mp4", forHTTPHeaderField: "Content-Type")
+        put.setValue(String(size), forHTTPHeaderField: "Content-Length")
+        let (_, result) = try await URLSession.shared.upload(for: put, fromFile: file)
+        guard let code = (result as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { throw ShareError.failed }
+        return PublishedVideo(key: upload.key, hasAudio: videoHasAudio)
+    }
     enum ShareError: LocalizedError {
-        case configuration, tooLarge, failed
-        var errorDescription: String? { switch self { case .configuration: "Configure LyricStudio’s RxAuth client and production website URL before sharing."; case .tooLarge: "This translation exceeds the 1 MB sharing limit."; case .failed: "The sharing request failed. Check your sign-in and server connection, then try again." } }
+        case configuration, tooLarge, failed, videoSize
+        var errorDescription: String? { switch self { case .videoSize: "Choose an MP4 video smaller than 2 GB."; case .configuration: "Configure LyricStudio’s RxAuth client and production website URL before sharing."; case .tooLarge: "This translation exceeds the 1 MB sharing limit."; case .failed: "The sharing request failed. Check your sign-in and server connection, then try again." } }
     }
 }
 

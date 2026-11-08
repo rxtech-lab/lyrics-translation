@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 
 extension UTType { static let lyricDocument = UTType(exportedAs: "app.rxlab.lyric-document", conformingTo: .data) }
@@ -53,6 +54,35 @@ struct AgentSetting: Codable, Identifiable {
     var model = ""
     var executable = ""
     var arguments = ""
+}
+/// Remotion project written by the video director agent; it reads timings from song.json at render time.
+struct LyricVideoScript: Codable, Identifiable {
+    var id = UUID()
+    var track: String
+    /// Single-file script from earlier versions; `files` supersedes it.
+    var source = ""
+    /// Agent-owned files under src/, keyed by relative path, e.g. "video.tsx".
+    var files: [String: String]?
+    /// Generated raster layers, keyed by filename under public/scenes/.
+    var assets: [String: Data]?
+    var style: String
+    var agent: String
+    var created = Date()
+
+    init(track: String, files: [String: String], assets: [String: Data]? = nil, style: String, agent: String) {
+        self.track = track; self.files = files; self.assets = assets; self.style = style; self.agent = agent
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        track = try c.decode(String.self, forKey: .track)
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
+        files = try c.decodeIfPresent([String: String].self, forKey: .files)
+        assets = try c.decodeIfPresent([String: Data].self, forKey: .assets)
+        style = try c.decodeIfPresent(String.self, forKey: .style) ?? "Director’s cut"
+        agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? ""
+        created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
+    }
 }
 struct Revision: Codable, Identifiable {
     var id = UUID()
@@ -117,6 +147,16 @@ struct Song: Codable {
     var timingOffset: Double?
     /// Translation runs, newest first, so stopped or interrupted ones can be resumed. Optional so older documents still open.
     var translationJobs: [TranslationJob]?
+    /// Single saved lyric video from an earlier build; read once into `videoHistory`.
+    var lyricVideo: LyricVideoScript?
+    /// Agent-written lyric videos, newest first. Optional so older documents still open.
+    var videoScripts: [LyricVideoScript]?
+    var videoHistory: [LyricVideoScript] {
+        get { videoScripts ?? lyricVideo.map { [$0] } ?? [] }
+        set { videoScripts = Array(newValue.prefix(12)); lyricVideo = nil }
+    }
+    /// Lyric video director agent. Optional so older documents still open.
+    var videoDirector: AgentSetting?
     var jobs: [TranslationJob] {
         get { translationJobs ?? [] }
         set { translationJobs = newValue }
@@ -221,8 +261,30 @@ struct LyricDocument: FileDocument {
 }
 @main struct LyricStudioApp: App {
     @StateObject private var updates = AppUpdates()
-    var body: some Scene { DocumentGroup(newDocument: LyricDocument()) { file in StudioView(document: file.$document, title: file.fileURL?.deletingPathExtension().lastPathComponent ?? "") }
+    init() {
+        NSWindow.allowsAutomaticWindowTabbing = true
+    }
+
+    var body: some Scene { DocumentGroup(newDocument: LyricDocument()) { file in
+        StudioView(document: file.$document, title: file.fileURL?.deletingPathExtension().lastPathComponent ?? "")
+            .background(DocumentWindowTabs())
+    }
         .commands { CommandGroup(after: .appInfo) { Button("Check for Updates…") { updates.check() }.disabled(!updates.available) } }
+    }
+}
+
+/// Configure the document window before display so AppKit supplies its native tab bar.
+private struct DocumentWindowTabs: NSViewRepresentable {
+    func makeNSView(context: Context) -> TabConfigurationView { TabConfigurationView() }
+    func updateNSView(_ nsView: TabConfigurationView, context: Context) {}
+
+    final class TabConfigurationView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            window.tabbingIdentifier = "app.rxlab.LyricStudio.documents"
+            window.tabbingMode = .preferred
+        }
     }
 }
 

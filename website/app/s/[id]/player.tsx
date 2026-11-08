@@ -22,7 +22,7 @@ declare global { interface Window { MusicKit: {configure: (c: unknown) => Promis
 const seconds = (value: number) => Number.isFinite(value) ? Math.max(0, value) : 0;
 const clock = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
 
-export default function Player({id, song, title, artist, lines, initialStarred, initialStars, tokenCount, usageSummary, children}: {children?: ReactNode; initialStarred:boolean; initialStars:number; tokenCount:number; usageSummary?:Document['usageSummary']; lines: Document["lines"]; id: string; song?: string; title?: string; artist?: string}) {
+export default function Player({id, song, title, artist, lines, initialStarred, initialStars, tokenCount, usageSummary, children, video}: {video?: {url: string; hasAudio: boolean}; children?: ReactNode; initialStarred:boolean; initialStars:number; tokenCount:number; usageSummary?:Document['usageSummary']; lines: Document["lines"]; id: string; song?: string; title?: string; artist?: string}) {
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [starred, setStarred] = useState(initialStarred);
   const [stars, setStars] = useState(initialStars);
@@ -112,6 +112,8 @@ export default function Player({id, song, title, artist, lines, initialStarred, 
     finally { setScrub(null); locked.current = false; setBusy(false); }
   }
 
+  const pauseMusic = useCallback(() => { music.current?.pause(); setPlaying(false); }, []);
+
   return <>
     {song && <Script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" onReady={() => setReady(true)} onError={() => setStatus('Apple Music could not load. Please reload to try again.')} />}
     <div className="translation-actions"><button className={`star-button ${starred ? 'is-starred' : ''}`} aria-pressed={starred} aria-busy={savingStar} disabled={savingStar || starred} onClick={async () => {
@@ -131,20 +133,20 @@ export default function Player({id, song, title, artist, lines, initialStarred, 
       } catch { setStatus('Could not save star. Please try again.'); }
       finally { starLock.current = false; setSavingStar(false); }
     }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.5 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.6l6.3-.9Z"/></svg>{savingStar ? 'Saving…' : starred ? 'Starred' : 'Star translation'}<span className="star-count" aria-live="polite">{stars}</span></button><UsageDialog count={tokenCount} summary={usageSummary}/>{children}<span className="translation-actions-note">Made with LyricStudio</span></div>
-    {song && <Karaoke open={expanded} onClose={() => setExpanded(false)} lines={lines} getTime={getPlaybackTime} onSeek={seek} title={title} artist={artist}><section className="floating-player" aria-label="Apple Music player" aria-busy={busy}>
+    {(song || video) && <Karaoke startWithVideo={!song} hasMusic={!!song} video={video} playing={playing} pauseMusic={pauseMusic} open={expanded} onClose={() => setExpanded(false)} lines={lines} getTime={getPlaybackTime} onSeek={seek} title={title} artist={artist}><section className="floating-player" aria-label={song ? "Apple Music player" : "Lyric video player"} aria-busy={busy}>
       <div className="player-top">
         <div className="player-art" aria-hidden="true"><PlayerIcon name="music"/></div>
-        <div className="floating-player-song"><span className="eyebrow">APPLE MUSIC</span><strong>{title || 'Linked song'}</strong>{artist && <small>{artist}</small>}</div>
+        <div className="floating-player-song"><span className="eyebrow">{song ? 'APPLE MUSIC' : 'LYRIC VIDEO'}</span><strong>{title || (song ? 'Linked song' : 'Lyric video')}</strong>{artist && <small>{artist}</small>}</div>
         <div className="player-controls">
           <button className="expand-control" aria-label={expanded ? "Close fullscreen lyrics" : "Open fullscreen lyrics"} onClick={() => setExpanded(!expanded)}><PlayerIcon name={expanded ? "collapse" : "expand"}/></button>
-          <button className="skip-control" aria-label="Back 10 seconds" title="Back 10 seconds" disabled={!duration || busy} onClick={() => void seek(position - 10)}><PlayerIcon name="back"/></button>
-          <button className="play-control" aria-label={playing ? 'Pause' : 'Play'} disabled={!ready || busy} onClick={() => void toggle()}>
+          {song && <button className="skip-control" aria-label="Back 10 seconds" title="Back 10 seconds" disabled={!duration || busy} onClick={() => void seek(position - 10)}><PlayerIcon name="back"/></button>}
+          <button className="play-control" aria-label={!song ? 'Watch lyric video' : playing ? 'Pause' : 'Play'} disabled={!!song && (!ready || busy)} onClick={() => { if (song) void toggle(); else setExpanded(true); }}>
             {busy ? <span className="player-spinner"/> : <svg viewBox="0 0 24 24" aria-hidden="true">{playing ? <path d="M6 4h4v16H6zm8 0h4v16h-4z"/> : <path d="M7 3v18l15-9z"/>}</svg>}
           </button>
-          <button className="skip-control" aria-label="Forward 10 seconds" title="Forward 10 seconds" disabled={!duration || busy} onClick={() => void seek(position + 10)}><PlayerIcon name="forward"/></button>
+          {song && <button className="skip-control" aria-label="Forward 10 seconds" title="Forward 10 seconds" disabled={!duration || busy} onClick={() => void seek(position + 10)}><PlayerIcon name="forward"/></button>}
         </div>
       </div>
-      <div className="player-progress">
+      {song && <div className="player-progress">
         <time>{clock(scrub ?? position)}</time>
         <input type="range" aria-label="Playback position" aria-valuetext={`${clock(scrub ?? position)} of ${clock(duration)}`} min={0} max={duration || 1} step={0.1} value={Math.min(scrub ?? position, duration || 1)} disabled={!duration || busy}
           onChange={event => setScrub(Number(event.target.value))}
@@ -153,7 +155,7 @@ export default function Player({id, song, title, artist, lines, initialStarred, 
           onKeyUp={event => { if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown'].includes(event.key)) void seek(Number(event.currentTarget.value)); }}
           onBlur={event => { if (scrub !== null) void seek(Number(event.currentTarget.value)); }} />
         <time>{duration ? clock(duration) : '–:––'}</time>
-      </div>
+      </div>}
     </section></Karaoke>}
     {status && <div className={song ? 'status player-status' : 'status'} role="status">{status} {needsSignIn && <a href="/api/auth/login" target="_blank" rel="noopener noreferrer">Sign in ↗</a>} <button className="status-dismiss" onClick={() => setStatus('')}>Dismiss</button></div>}
   </>;

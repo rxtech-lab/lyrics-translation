@@ -28,6 +28,8 @@ struct StudioView: View {
     @State private var showingJobs = false
     @State private var showingUsage = false
     @State private var karaoke = false
+    @State private var linkingMusic = false
+    @State private var unlinkingMusic = false
     @State private var musicError: String?
     @State private var musicScrub: Double?
     func backgroundPlayer(_ music: AppleMusicTrack) -> some View {
@@ -155,43 +157,53 @@ struct StudioView: View {
         }
         .frame(minWidth: 960, minHeight: 660)
         .toolbar {
-            // Setup: everything that shapes the song before/around translation.
             ToolbarItem(placement: .primaryAction) {
                 Menu("Song", systemImage: "doc.text") {
-                    Button("Share Translation…", systemImage: "square.and.arrow.up") { shareLineIDs = nil; sharing = true }
-                    Button("Edit Original Lyrics…", systemImage: "doc.text") { editingOriginal = true }
-                    Button("Translation Agents…", systemImage: "person.3") { team = false }
-                    Divider()
-                    Button("Version History…", systemImage: "clock.arrow.circlepath") { sheet = "Versions" }
+                    Section("Edit") {
+                        Button("Edit Original Lyrics…", systemImage: "doc.text") { editingOriginal = true }
+                            .disabled(pipeline.running)
+                        Button("Translation Agents…", systemImage: "person.3") { team = false }
+                            .disabled(pipeline.running)
+                        Button("Version History…", systemImage: "clock.arrow.circlepath") { sheet = "Versions" }
+                            .disabled(pipeline.running)
+                    }
+                    Section("Apple Music") {
+                        if document.song.appleMusic == nil {
+                            Button("Link Music…", systemImage: "link") { linkingMusic = true }
+                        } else {
+                            Button("Change Linked Music…", systemImage: "magnifyingglass") { linkingMusic = true }
+                            Button("Unlink Music…", systemImage: "link.badge.plus", role: .destructive) { unlinkingMusic = true }
+                        }
+                    }
+                    Section {
+                        Button("Share Translation…", systemImage: "square.and.arrow.up") { shareLineIDs = nil; sharing = true }
+                            .disabled(pipeline.running)
+                    }
                 }
-                .disabled(pipeline.running)
-                .help("Original lyrics, agents and versions")
+                .help("Edit lyrics, configure agents, link music and share")
             }
-            // Insights: read-only views into what the agents did.
             ToolbarItem(placement: .primaryAction) {
+                Menu("Playback", systemImage: "play.rectangle") {
+                    Button("Karaoke…", systemImage: "music.mic") { karaoke = true }
+                        .disabled(document.song.lines.isEmpty)
+                        .keyboardShortcut("k", modifiers: [.command, .shift])
+                    Button("Lyric Video…", systemImage: "film") { video = true }
+                }
+                .help("Karaoke timing and lyric video")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                let resumable = document.song.jobs.filter { $0.state != .completed && !(pipeline.running && pipeline.jobID == $0.id) && !$0.pendingIDs.isEmpty }.count
                 Menu("Insights", systemImage: "sparkles.rectangle.stack") {
+                    Button(resumable > 0 ? "Translation Jobs… (\(resumable) resumable)" : "Translation Jobs…", systemImage: "list.bullet.clipboard") { showingJobs = true }
+                    Divider()
                     Button("Agent Conversation", systemImage: "bubble.left.and.bubble.right") { ConversationWindow.open(id: conversationID, song: $document.song, pipeline: pipeline, title: title) }
                     Button("Activity Log", systemImage: "list.bullet.rectangle") { sheet = "Activity" }
                     Button("Usage & Cost", systemImage: "chart.bar.xaxis") { showingUsage = true }
                 }
-                .help("Conversation, activity and usage")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button("Lyric Video", systemImage: "film") { video = true }
-                Button("Karaoke", systemImage: "music.mic") { karaoke = true }
-                    .disabled(document.song.lines.isEmpty)
-                    .keyboardShortcut("k", modifiers: [.command, .shift])
-                    .help("Time sung words to an Apple Music recording")
+                .badge(resumable)
+                .help("Translation jobs, conversation, activity and usage")
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) {
-                let resumable = document.song.jobs.filter { $0.state != .completed && !(pipeline.running && pipeline.jobID == $0.id) && !$0.pendingIDs.isEmpty }.count
-                Button { showingJobs = true } label: {
-                    Label("Jobs", systemImage: resumable > 0 ? "list.bullet.clipboard.fill" : "list.bullet.clipboard")
-                }
-                .badge(resumable)
-                .help(resumable > 0 ? "\(resumable) translation job\(resumable == 1 ? "" : "s") can be resumed" : "Translation jobs")
-            }
             // The one primary action, which turns into Stop while agents run.
             ToolbarItem(placement: .primaryAction) {
                 if pipeline.running {
@@ -206,6 +218,34 @@ struct StudioView: View {
                         .help("Choose agents and translate every line")
                 }
             }
+        }
+        .sheet(isPresented: $linkingMusic) {
+            NavigationStack {
+                AppleMusicSearchView(playback: MusicPlayback.shared, current: document.song.appleMusic, suggestion: title) { music in
+                    if document.song.appleMusic?.id != music.id { MusicPlayback.shared.pause() }
+                    document.song.appleMusic = music
+                    musicScrub = nil
+                    linkingMusic = false
+                    pipeline.status = "Music linked: \(music.title)"
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { linkingMusic = false }
+                    }
+                }
+            }
+            .frame(minWidth: 600, minHeight: 500)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .confirmationDialog("Unlink music?", isPresented: $unlinkingMusic) {
+            Button("Unlink Music", role: .destructive) {
+                if MusicPlayback.shared.loadedID == document.song.appleMusic?.id { MusicPlayback.shared.pause() }
+                document.song.appleMusic = nil
+                musicScrub = nil
+                pipeline.status = "Music unlinked"
+            }
+        } message: {
+            Text("Your lyrics and word timings will be kept.")
         }
         .overlay(alignment: .top) {
             if !pipeline.status.isEmpty {
@@ -294,7 +334,7 @@ struct StudioView: View {
         .sheet(isPresented: $showingJobs) { TranslationJobsSheet(song: $document.song, pipeline: pipeline) }
         .sheet(isPresented: $sharing) { ShareLyricsSheet(song: $document.song, title: title, initialLineIDs: shareLineIDs) }
         .sheet(isPresented: $showingUsage) { UsageSheet(song: $document.song) }
-        .sheet(isPresented: $video) { LyricVideoSheet(song: document.song, title: title) }
+        .sheet(isPresented: $video) { LyricVideoSheet(song: $document.song, title: title) }
         .sheet(isPresented: $karaoke) { KaraokeSheet(song: $document.song, title: title) }
         .onDisappear { pipeline.stop(); ConversationWindow.close(id: conversationID) }
     }
