@@ -41,6 +41,13 @@ test('presigned upload binds media type and size and resolves media URL', async 
     assert.match(url.searchParams.get('X-Amz-SignedHeaders')!, /content-type/);
     assert.ok(upload.key.startsWith(videoPrefix('alice', documentId)));
     assert.equal(videoURL(upload.key), `https://media.example.com/videos/${upload.key}`);
+    process.env.S3_ENDPOINT = 'https://account.r2.cloudflarestorage.com/lyrics-studio';
+    process.env.S3_VIDEO_PUBLIC_URL = 'https://lyricss3.rxlab.app';
+    const nestedUpload = await createVideoUpload('alice', documentId, 1024);
+    assert.ok(new URL(nestedUpload.uploadURL).pathname.endsWith(`/lyrics-studio/${nestedUpload.key}`));
+    assert.equal(videoURL(nestedUpload.key), `https://lyricss3.rxlab.app/lyrics-studio/${nestedUpload.key}`);
+    process.env.S3_VIDEO_PUBLIC_URL = 'https://lyricss3.rxlab.app/lyrics-studio/';
+    assert.equal(videoURL(key), `https://lyricss3.rxlab.app/lyrics-studio/${key}`);
     process.env.S3_VIDEO_PUBLIC_URL = 'http://media.example.com';
     assert.throws(() => videoURL(upload.key), /HTTPS/);
   } finally {
