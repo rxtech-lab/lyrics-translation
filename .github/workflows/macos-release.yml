@@ -18,8 +18,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.resolve_public_key_only
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
       - run: python3 -m pip install cryptography
@@ -29,7 +29,7 @@ jobs:
         run: python3 scripts/ci/resolve-sparkle-key.py
       - name: Export public key
         run: printf '%s\n' "$SPARKLE_PUBLIC_KEY" > sparkle-public-key.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sparkle-public-key
           path: sparkle-public-key.txt
@@ -44,13 +44,13 @@ jobs:
       BUILD_NUMBER: ${{ github.run_number }}
       SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY || secrets.SPARKLE_PUBLIC_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: rxtech-lab/RxAgentSDK
           token: ${{ secrets.RELEASE_TOKEN }}
           path: dependencies/RxAgentSDK
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: rxtech-lab/film-workflow
           token: ${{ secrets.RELEASE_TOKEN }}
@@ -68,7 +68,7 @@ jobs:
         with:
           xcode-version: latest-stable
       - run: brew install xcodegen
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
       - run: python3 -m pip install cryptography markdown
@@ -78,7 +78,7 @@ jobs:
           SPARKLE_KEY: ${{ secrets.SPARKLE_KEY }}
         run: python3 scripts/ci/resolve-sparkle-key.py
       - run: python3 scripts/ci/test_validate_appcast.py
-      - uses: apple-actions/import-codesign-certs@v3
+      - uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           p12-password: ${{ secrets.P12_PASSWORD }}
@@ -123,7 +123,7 @@ jobs:
         run: |
           gh release upload "$VERSION" LyricStudio.dmg --clobber
           gh release edit "$VERSION" --draft=false
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: output/pages
   deploy:
@@ -136,6 +136,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/configure-pages@v5
-      - uses: actions/deploy-pages@v4
+      - uses: actions/configure-pages@v6
+      - uses: actions/deploy-pages@v5
         id: deployment
