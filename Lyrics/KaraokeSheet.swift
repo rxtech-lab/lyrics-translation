@@ -519,7 +519,7 @@ struct StatusOverlay: View {
 // MARK: Search
 
 /// Searches the Apple Music catalog for the recording to link.
-private struct AppleMusicSearchView: View {
+struct AppleMusicSearchView: View {
     let playback: MusicPlayback
     let current: AppleMusicTrack?
     let suggestion: String
