@@ -194,7 +194,7 @@ struct WordTimingEditor: View {
         .background { PlayingWordTracker(playback: playback, words: words, index: $playingWord) }
     }
 
-    /// Timeline that grows with the window: the ruler on top, then a word track filling the remaining height.
+    /// Timeline that grows with the window and adds tracks for overlapping words.
     var lane: some View {
         GeometryReader { proxy in
             lane(height: max(130, proxy.size.height - 20))
@@ -204,8 +204,14 @@ struct WordTimingEditor: View {
 
     func lane(height: Double) -> some View {
         let width = max(1, (visible.upperBound - visible.lowerBound) * pointsPerSecond)
-        let track = height - 30
-        return ScrollView(.horizontal) {
+        let tracks = WordTimingTracks(words.enumerated().compactMap { index, word in
+            guard let start = word.start, let end = word.end else { return nil }
+            // Include the minimum rendered width so even very short words remain accessible.
+            return (index: index, start: start, end: max(end, start + 6 / pointsPerSecond))
+        })
+        let track = max(height - 30, Double(tracks.count) * 64 + 16)
+        let rowHeight = track / Double(tracks.count)
+        return ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
                 Ruler(range: visible, pointsPerSecond: pointsPerSecond, viewport: max(0, scrollX - 20)...max(0, scrollX + viewportWidth)).frame(width: width, height: 26)
                     .contentShape(.rect)
@@ -213,6 +219,11 @@ struct WordTimingEditor: View {
                 Rectangle().fill(.quaternary.opacity(0.35)).frame(width: width, height: track).offset(y: 30)
                     .onTapGesture(coordinateSpace: .local) { point in playFrom(visible.lowerBound + point.x / pointsPerSecond) }
                     .gesture(marqueeGesture)
+                ForEach(1..<tracks.count, id: \.self) { row in
+                    Rectangle().fill(.separator).frame(width: width, height: 1)
+                        .offset(y: 30 + Double(row) * rowHeight)
+                        .allowsHitTesting(false)
+                }
                 if showWaveform, let id = playback.loadedID {
                     let leading = min(width, max(0, scrollX - 20))
                     WaveformLane(recorder: recorder, id: id, start: visible.lowerBound + leading / pointsPerSecond, pointsPerSecond: pointsPerSecond)
@@ -229,15 +240,18 @@ struct WordTimingEditor: View {
                         .allowsHitTesting(false)
                 }
                 ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                    if let start = word.start, let end = word.end { block(index, word, start: start, end: end, track: track) }
+                    if let start = word.start, let end = word.end {
+                        block(index, word, start: start, end: end, track: rowHeight)
+                            .offset(y: Double(tracks.rows[index] ?? 0) * rowHeight)
+                    }
                 }
                 if let snapGuide {
-                    Rectangle().fill(.yellow).frame(width: 1.5, height: height - 4)
+                    Rectangle().fill(.yellow).frame(width: 1.5, height: track + 26)
                         .offset(x: (snapGuide - visible.lowerBound) * pointsPerSecond - 0.75)
                         .allowsHitTesting(false)
                 }
             }
-            .frame(width: width, height: height, alignment: .topLeading)
+            .frame(width: width, height: track + 30, alignment: .topLeading)
             .padding(.horizontal, 20)
         }
         .scrollPosition($scrollPosition)
@@ -763,6 +777,25 @@ struct WordTimingEditor: View {
     }
 
     func stamp(_ value: Double?) -> String { value.map { String(format: "%.3f s", $0) } ?? "…" }
+}
+
+/// Packs half-open time spans into the fewest tracks, keeping lyric order for equal starts.
+/// Touching edges share a track; overlapping spans always occupy different tracks.
+struct WordTimingTracks {
+    let rows: [Int: Int]
+    let count: Int
+
+    init(_ spans: [(index: Int, start: Double, end: Double)]) {
+        var rows: [Int: Int] = [:]
+        var ends: [Double] = []
+        for span in spans.sorted(by: { $0.start == $1.start ? $0.index < $1.index : $0.start < $1.start }) {
+            let row = ends.firstIndex(where: { $0 <= span.start }) ?? ends.count
+            if row == ends.count { ends.append(span.end) } else { ends[row] = span.end }
+            rows[span.index] = row
+        }
+        self.rows = rows
+        count = max(1, ends.count)
+    }
 }
 
 /// Repaint only the viewport playhead, without invalidating the song-wide SwiftUI layout each frame.
