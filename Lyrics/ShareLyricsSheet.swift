@@ -1,8 +1,8 @@
-import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 import RxAuthSwift
 import RxAuthSwiftUI
+import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 struct ShareLyricsSheet: View {
@@ -32,11 +32,13 @@ struct ShareLyricsSheet: View {
         let id = UUID()
         let manager: OAuthManager
     }
+
     @State private var signedIn = false
     private let storage = KeychainTokenStorage(serviceName: "app.rxlab.LyricStudio.auth")
     private var server: String {
         Bundle.main.object(forInfoDictionaryKey: "LyricStudioServerURL") as? String ?? ""
     }
+
     var body: some View {
         Group {
             if let initialLineIDs {
@@ -51,6 +53,7 @@ struct ShareLyricsSheet: View {
             if signedIn { await checkPublication() }
         }
     }
+
     private var publicationView: some View {
         NavigationStack {
             Form {
@@ -164,18 +167,18 @@ struct ShareLyricsSheet: View {
         } message: { Text("This removes the translation from Discover and disables its public link.") }
         .sheet(item: $signInSession) { session in
             let manager = session.manager
-                NavigationStack {
-                    RxSignInView(
-                        manager: manager,
-                        appearance: RxSignInAppearance(title: "Welcome to LyricStudio", subtitle: "Sign in to share your lyric translations.", accentColor: .blue),
-                        onAuthSuccess: { signedIn = true; signInSession = nil; Task { await checkPublication() } }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .navigationTitle("Sign In")
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { signInSession = nil }.disabled(manager.isAuthenticating) } }
-                }
-                .frame(minWidth: 580, minHeight: 680)
-                .interactiveDismissDisabled(manager.isAuthenticating)
+            NavigationStack {
+                RxSignInView(
+                    manager: manager,
+                    appearance: RxSignInAppearance(title: "Welcome to LyricStudio", subtitle: "Sign in to share your lyric translations.", accentColor: .blue),
+                    onAuthSuccess: { signedIn = true; signInSession = nil; Task { await checkPublication() } }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationTitle("Sign In")
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { signInSession = nil }.disabled(manager.isAuthenticating) } }
+            }
+            .frame(minWidth: 580, minHeight: 680)
+            .interactiveDismissDisabled(manager.isAuthenticating)
         }
         .overlay { if busy { ProgressView(activity).padding(30).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20)) } }
         .overlay {
@@ -187,10 +190,12 @@ struct ShareLyricsSheet: View {
         }
         .alert("Sharing", isPresented: Binding(get: { status != nil }, set: { if !$0 { status = nil } })) { Button("OK") { status = nil } } message: { Text(status ?? "") }
     }
+
     private var displayTitle: String { title.isEmpty ? "Untitled Translation" : title }
     private var timedLines: Int {
         song.lines.filter { !($0.originalTiming ?? []).isEmpty || !($0.translationTiming ?? []).isEmpty }.count
     }
+
     private var header: some View {
         HStack(spacing: 16) {
             Group {
@@ -216,18 +221,20 @@ struct ShareLyricsSheet: View {
         }
         .padding(.vertical, 6)
     }
+
     private var statusBadge: some View {
         let (text, symbol, tint): (String, String, Color) =
             sharedURL != nil ? ("Published to Discover", "checkmark.seal.fill", .green)
-            : !signedIn ? ("Sign in to publish", "person.crop.circle", .secondary)
-            : loaded ? ("Not published", "eye.slash", .secondary)
-            : ("Status unavailable", "exclamationmark.triangle.fill", .orange)
+                : !signedIn ? ("Sign in to publish", "person.crop.circle", .secondary)
+                : loaded ? ("Not published", "eye.slash", .secondary)
+                : ("Status unavailable", "exclamationmark.triangle.fill", .orange)
         return Label(text, systemImage: symbol)
             .font(.caption.weight(.medium))
             .foregroundStyle(tint)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(tint.opacity(0.15), in: Capsule())
     }
+
     private func sharedItem(_ title: String, detail: String, symbol: String, tint: Color) -> some View {
         HStack(spacing: 12) {
             Image(systemName: symbol)
@@ -241,6 +248,7 @@ struct ShareLyricsSheet: View {
             }
         }
     }
+
     @ViewBuilder private var primaryAction: some View {
         if sharedURL != nil {
             Button("Update") { Task { await publish() } }
@@ -259,6 +267,7 @@ struct ShareLyricsSheet: View {
                 .disabled(busy)
         }
     }
+
     private func copy(_ url: URL) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
@@ -268,10 +277,12 @@ struct ShareLyricsSheet: View {
             withAnimation { copied = false }
         }
     }
+
     private func prepareSignIn() {
-        do { signInSession = SignInSession(manager: try authenticationManager()) }
+        do { signInSession = try SignInSession(manager: authenticationManager()) }
         catch { status = error.localizedDescription }
     }
+
     private func authenticationManager() throws -> OAuthManager {
         if let manager { return manager }
         guard let client = Bundle.main.object(forInfoDictionaryKey: "RxAuthClientID") as? String,
@@ -294,6 +305,7 @@ struct ShareLyricsSheet: View {
         manager = auth
         return auth
     }
+
     private func checkPublication(unpublish: Bool = false) async {
         guard !busy, let id = song.publicationID else { return }
         busy = true
@@ -327,6 +339,7 @@ struct ShareLyricsSheet: View {
             status = error.localizedDescription
         }
     }
+
     private func publish() async {
         activity = sharedURL == nil ? "Publishing…" : "Updating publication…"
         busy = true; defer { busy = false }
@@ -374,6 +387,7 @@ struct ShareLyricsSheet: View {
             status = "Translation published."
         } catch { status = error.localizedDescription }
     }
+
     private func uploadVideo(_ file: URL, token: String) async throws -> PublishedVideo {
         let scoped = file.startAccessingSecurityScopedResource()
         defer { if scoped { file.stopAccessingSecurityScopedResource() } }
@@ -396,9 +410,10 @@ struct ShareLyricsSheet: View {
         put.setValue("video/mp4", forHTTPHeaderField: "Content-Type")
         put.setValue(String(size), forHTTPHeaderField: "Content-Length")
         let (_, result) = try await URLSession.shared.upload(for: put, fromFile: file)
-        guard let code = (result as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { throw ShareError.failed }
+        guard let code = (result as? HTTPURLResponse)?.statusCode, (200 ..< 300).contains(code) else { throw ShareError.failed }
         return PublishedVideo(key: upload.key, hasAudio: videoHasAudio)
     }
+
     enum ShareError: LocalizedError {
         case configuration, tooLarge, failed, videoSize
         var errorDescription: String? { switch self { case .videoSize: "Choose an MP4 video smaller than 2 GB."; case .configuration: "Configure LyricStudio’s RxAuth client and production website URL before sharing."; case .tooLarge: "This translation exceeds the 1 MB sharing limit."; case .failed: "The sharing request failed. Check your sign-in and server connection, then try again." } }
@@ -416,6 +431,7 @@ private struct LyricImageShareSheet: View {
         self.publishedURL = publishedURL
         _selected = State(initialValue: Set(song.lines.enumerated().compactMap { initialLineIDs.contains($0.element.id) ? $0.offset : nil }))
     }
+
     @Environment(\.dismiss) private var dismiss
     @State private var selected = Set<Int>()
     @State private var error: String?
@@ -454,6 +470,7 @@ private struct LyricImageShareSheet: View {
         }
         .alert("Unable to export", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") {} } message: { Text(error ?? "") }
     }
+
     private func share(saveToDisk: Bool = false) {
         saved = false
         preparing = true

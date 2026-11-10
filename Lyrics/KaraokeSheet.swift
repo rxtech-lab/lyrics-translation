@@ -26,7 +26,16 @@ struct KaraokeSheet: View {
                     VStack(spacing: 0) {
                         SongHeader(music: music, progress: song.timedCount(track), onAutoDetect: { detecting = true }) { path.append(.timing) }
                         Divider()
-                        KaraokeStage(song: song, track: track, display: display, playback: playback) { path.append(.timing) }
+                        Group {
+                            if path.isEmpty {
+                                KaraokeStage(song: song, track: track, display: display, playback: playback,
+                                             isActive: !detecting) { path.append(.timing) }
+                            } else {
+                                // NavigationStack retains its root. Remove the hidden lyric tree
+                                // so timing edits don't measure hundreds of offscreen word views.
+                                Color.clear
+                            }
+                        }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             // Clipping only affects drawing; moving lyric rows must not intercept
                             // clicks on the song header or playback controls outside the stage.
@@ -167,6 +176,8 @@ private struct KaraokeStage: View {
     let track: KaraokeTrack
     let display: LyricDisplay
     let playback: MusicPlayback
+    /// Suspend the lyric clocks while an automatic timing sheet covers the preview.
+    let isActive: Bool
     var onTime: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var following = true
@@ -236,7 +247,7 @@ private struct KaraokeStage: View {
                                                 catch { playbackError = error.localizedDescription }
                                             }
                                         } label: {
-                                            TimelineView(.animation) { _ in
+                                            TimelineView(.animation(paused: !isActive)) { _ in
                                                 let time = playback.time
                                                 line(item.line, span: item.span, time: time, state: Self.state(item.span, time: time),
                                                      side: sides[item.line.speaker ?? ""] ?? .leading, showTag: showTag.contains(index),
@@ -267,7 +278,7 @@ private struct KaraokeStage: View {
                     .background {
                         // Scroll clock: recomputes the focus line a few dozen times a second without
                         // rebuilding the list.
-                        TimelineView(.animation(minimumInterval: 1 / 30)) { _ in
+                        TimelineView(.animation(minimumInterval: 1 / 30, paused: !isActive)) { _ in
                             let focus = Self.focusLine(lines.map(\.span), order: order, time: playback.time)
                             Color.clear.onChange(of: focus, initial: true) { _, new in target = new }
                         }

@@ -236,12 +236,6 @@ struct WordTimingEditor: View {
                         .offset(x: (snapGuide - visible.lowerBound) * pointsPerSecond - 0.75)
                         .allowsHitTesting(false)
                 }
-                TimelineView(.animation) { _ in
-                    let x = (playback.time - visible.lowerBound) * pointsPerSecond
-                    Rectangle().fill(.red).frame(width: 2, height: height - 4).offset(x: x - 1)
-                        .opacity(x >= 0 && x <= width ? 1 : 0)
-                        .allowsHitTesting(false)
-                }
             }
             .frame(width: width, height: height, alignment: .topLeading)
             .padding(.horizontal, 20)
@@ -271,6 +265,12 @@ struct WordTimingEditor: View {
         .scrollDisabled(drag != nil)
         .contentShape(.rect)
         .clipped()
+        .overlay(alignment: .topLeading) {
+            TimingPlayhead(playback: playback, origin: visible.lowerBound,
+                           pointsPerSecond: pointsPerSecond, scrollX: scrollX)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 
     func block(_ index: Int, _ word: TimedWord, start: Double, end: Double, track: Double) -> some View {
@@ -765,6 +765,58 @@ struct WordTimingEditor: View {
     func stamp(_ value: Double?) -> String { value.map { String(format: "%.3f s", $0) } ?? "…" }
 }
 
+/// Repaint only the viewport playhead, without invalidating the song-wide SwiftUI layout each frame.
+private struct TimingPlayhead: NSViewRepresentable {
+    let playback: MusicPlayback
+    let origin: Double
+    let pointsPerSecond: Double
+    let scrollX: Double
+
+    func makeNSView(context: Context) -> PlayheadView { PlayheadView() }
+
+    func updateNSView(_ view: PlayheadView, context: Context) {
+        view.position = { 20 + (playback.time - origin) * pointsPerSecond - scrollX }
+        view.updatePosition()
+    }
+
+    static func dismantleNSView(_ view: PlayheadView, coordinator: ()) { view.stop() }
+
+    final class PlayheadView: NSView {
+        var position: (() -> Double)?
+        private var timer: Timer?
+        private var x: Double?
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updatePosition() }
+            }
+            self.timer = timer
+            // Keep updating during word drags and trackpad scrolling, too.
+            RunLoop.main.add(timer, forMode: .common)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        func stop() { timer?.invalidate(); timer = nil; position = nil }
+
+        func updatePosition() {
+            guard let position else { return }
+            let next = position()
+            let visible = next >= 0 && next <= bounds.width ? next : nil
+            guard visible != x else { return }
+            x = visible
+            needsDisplay = true
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            guard let x else { return }
+            NSColor.systemRed.setFill()
+            NSRect(x: x - 1, y: 4, width: 2, height: max(0, bounds.height - 4)).fill()
+        }
+    }
+}
+
 /// Tracks which word is under the playhead. Playback time isn't observable, so this polls it in a
 /// tiny view and only writes `index` when the word changes, keeping the word strip from redrawing every frame.
 private struct PlayingWordTracker: View {
@@ -773,9 +825,12 @@ private struct PlayingWordTracker: View {
     @Binding var index: Int?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { _ in
-            let current = current()
-            Color.clear.onChange(of: current, initial: true) { _, new in index = new }
+        Color.clear.task(id: words) {
+            while !Task.isCancelled {
+                let next = current()
+                if next != index { index = next }
+                do { try await Task.sleep(for: .milliseconds(33)) } catch { return }
+            }
         }
     }
 
