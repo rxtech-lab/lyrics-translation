@@ -30,8 +30,10 @@ struct WordTimingEditor: View {
     @State private var pendingZoom: Double?
     /// Zoom level when the current pinch began.
     @State private var pinchBase: Double?
-    /// Word under the playhead while the song plays, highlighted in the word strip.
-    @State private var playingWord: Int?
+    /// Every word under the playhead, including simultaneous vocals.
+    @State private var playingWords: Set<Int> = []
+    @State private var mergingTracks = false
+    @State private var mergeTrack = 0
     @State private var drag: DragState?
     /// Undo history for this editor. Each entry is a line's words before (undo) or after (redo) a change.
     @State private var undoStack: [Snapshot] = []
@@ -130,6 +132,7 @@ struct WordTimingEditor: View {
         .confirmationDialog("Revert this line to how it was when you opened it?", isPresented: $confirmRevert) {
             Button("Revert Line", role: .destructive) { words = original; commit(); fit(); report("Line reverted") }
         }
+        .sheet(isPresented: $mergingTracks) { mergeTrackSheet }
     }
 
     // MARK: Sections
@@ -145,7 +148,7 @@ struct WordTimingEditor: View {
                 Spacer(minLength: 0)
                 lineNavigator
             }
-            Text("Drag a word to move it, drag its edges to trim. Drag the empty track or ⇧/⌘-click to select several and move them together. ← → select · ⌘← ⌘→ previous/next line · [ ] set start/end at playhead · Return plays the word")
+            Text("Drag a word to move it, drag its edges to trim. Drag the empty track or ⇧/⌘-click to select several; right-click the selection to merge tracks. ← → select · ⌘← ⌘→ previous/next line · [ ] set start/end at playhead · Return plays the word")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,30 +174,107 @@ struct WordTimingEditor: View {
 
     /// Every word of the line, including untimed ones, for selection.
     var wordStrip: some View {
-        FlowLayout(spacing: 6, lineSpacing: 6) {
+        let tracks = trackLayout
+        return FlowLayout(spacing: 6, lineSpacing: 6) {
             ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                let playing = index == playingWord
+                let playing = playingWords.contains(index)
+                let color = trackColor(tracks.rows[index] ?? 0)
                 Text(word.text)
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .foregroundStyle(isSelected(index) || playing ? AnyShapeStyle(.white) : word.isTimed ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    .background(playing ? AnyShapeStyle(.orange) : isSelected(index) ? (index == selection ? AnyShapeStyle(.tint) : AnyShapeStyle(.tint.opacity(0.7))) : word.isTimed ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.5)), in: .rect(cornerRadius: 6))
+                    .foregroundStyle(isSelected(index) || playing ? AnyShapeStyle(.white) : word.isTimed ? AnyShapeStyle(color) : AnyShapeStyle(.secondary))
+                    .background(playing || isSelected(index) ? AnyShapeStyle(color.opacity(playing || index == selection ? 1 : 0.7)) : word.isTimed ? AnyShapeStyle(color.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.5)), in: .rect(cornerRadius: 6))
                     .overlay {
                         // Keep the selection visible while the word is playing.
-                        if playing, isSelected(index) { RoundedRectangle(cornerRadius: 6).strokeBorder(.white, lineWidth: 2) }
+                        if isSelected(index) { RoundedRectangle(cornerRadius: 6).strokeBorder(.white, lineWidth: 2) }
                     }
                     .overlay {
                         if !word.isTimed { RoundedRectangle(cornerRadius: 6).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3])).foregroundStyle(.secondary) }
                     }
                     .onTapGesture { select(index, modifiers: NSEvent.modifierFlags) }
-                    .help(word.isTimed ? "\(stamp(word.start)) – \(stamp(word.end))" : "Not timed · use Set at Playhead")
+                    .contextMenu { trackMenu(index) }
+                    .accessibilityValue(playing ? "Playing, Track \((tracks.rows[index] ?? 0) + 1)" : "Track \((tracks.rows[index] ?? 0) + 1)")
+                    .help(word.isTimed ? "Track \((tracks.rows[index] ?? 0) + 1) · \(stamp(word.start)) – \(stamp(word.end))" : "Not timed · use Set at Playhead")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20).padding(.vertical, 10)
-        .background { PlayingWordTracker(playback: playback, words: words, index: $playingWord) }
+        .background { PlayingWordTracker(playback: playback, words: words, indices: $playingWords) }
     }
 
-    /// Timeline that grows with the window: the ruler on top, then a word track filling the remaining height.
+    var trackLayout: WordTimingTracks {
+        WordTimingTracks(words.enumerated().compactMap { index, word in
+            guard let start = word.start, let end = word.end else { return nil }
+            return (index: index, start: start, end: max(end, start + 6 / pointsPerSecond))
+        }, overrides: Dictionary(uniqueKeysWithValues: words.enumerated().compactMap { index, word in
+            word.timingTrack.map { (index, $0) }
+        }))
+    }
+
+    func trackColor(_ row: Int) -> Color {
+        let colors: [Color] = [.blue, .purple, .teal, .orange, .pink, .indigo, .green]
+        return colors[max(0, row) % colors.count]
+    }
+
+    @ViewBuilder func trackMenu(_ index: Int) -> some View {
+        Button("Merge Selected Words into One Track…", systemImage: "rectangle.3.group") {
+            mergeTrack = trackLayout.rows[selection] ?? 0
+            mergingTracks = true
+        }
+        .disabled(!isSelected(index) || group.count < 2 || group.contains { words[$0].start == nil || words[$0].end == nil } || drag != nil)
+    }
+
+    var mergeTrackSheet: some View {
+        NavigationStack {
+            Form {
+                Text("Place \(group.count) selected words on one track. Word timings stay the same.")
+                Picker("Destination", selection: $mergeTrack) {
+                    ForEach(0...trackLayout.count, id: \.self) { row in
+                        Text(row == trackLayout.count ? "New Track" : "Track \(row + 1)").tag(row)
+                    }
+                }
+                if let mergeProblem { Text(mergeProblem).foregroundStyle(.secondary) }
+            }
+            .formStyle(.grouped)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .navigationTitle("Merge Word Tracks")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { mergingTracks = false } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Merge") { mergeSelectedTracks() }.disabled(mergeProblem != nil)
+                }
+            }
+        }
+        .frame(width: 440, height: 300)
+    }
+
+    var mergeProblem: String? {
+        let members = group
+        let rows = trackLayout.rows
+        for index in members {
+            guard let start = words[index].start, let end = words[index].end else { return "Time the selected words first." }
+            for other in words.indices where other != index && (members.contains(other) || rows[other] == mergeTrack) {
+                guard let otherStart = words[other].start, let otherEnd = words[other].end else { continue }
+                if start < otherEnd && otherStart < end {
+                    return members.contains(other) ? "The selected words overlap in time. Adjust their timing before placing them on one track." : "Another word overlaps on this track. Choose another track."
+                }
+            }
+        }
+        return nil
+    }
+
+    func mergeSelectedTracks() {
+        guard mergeProblem == nil else { return }
+        // Preserve the other tracks so grouping does not rearrange unselected phrases.
+        let rows = trackLayout.rows
+        for index in words.indices {
+            words[index].timingTrack = group.contains(index) ? mergeTrack : rows[index]
+        }
+        commit()
+        mergingTracks = false
+        report("Selected words merged into Track \(mergeTrack + 1)")
+    }
+
+    /// Timeline that grows with the window and adds tracks for overlapping words.
     var lane: some View {
         GeometryReader { proxy in
             lane(height: max(130, proxy.size.height - 20))
@@ -204,8 +284,10 @@ struct WordTimingEditor: View {
 
     func lane(height: Double) -> some View {
         let width = max(1, (visible.upperBound - visible.lowerBound) * pointsPerSecond)
-        let track = height - 30
-        return ScrollView(.horizontal) {
+        let tracks = trackLayout
+        let track = max(height - 30, Double(tracks.count) * 64 + 16)
+        let rowHeight = track / Double(tracks.count)
+        return ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
                 Ruler(range: visible, pointsPerSecond: pointsPerSecond, viewport: max(0, scrollX - 20)...max(0, scrollX + viewportWidth)).frame(width: width, height: 26)
                     .contentShape(.rect)
@@ -213,6 +295,11 @@ struct WordTimingEditor: View {
                 Rectangle().fill(.quaternary.opacity(0.35)).frame(width: width, height: track).offset(y: 30)
                     .onTapGesture(coordinateSpace: .local) { point in playFrom(visible.lowerBound + point.x / pointsPerSecond) }
                     .gesture(marqueeGesture)
+                ForEach(1..<tracks.count, id: \.self) { row in
+                    Rectangle().fill(.separator).frame(width: width, height: 1)
+                        .offset(y: 30 + Double(row) * rowHeight)
+                        .allowsHitTesting(false)
+                }
                 if showWaveform, let id = playback.loadedID {
                     let leading = min(width, max(0, scrollX - 20))
                     WaveformLane(recorder: recorder, id: id, start: visible.lowerBound + leading / pointsPerSecond, pointsPerSecond: pointsPerSecond)
@@ -229,15 +316,18 @@ struct WordTimingEditor: View {
                         .allowsHitTesting(false)
                 }
                 ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                    if let start = word.start, let end = word.end { block(index, word, start: start, end: end, track: track) }
+                    if let start = word.start, let end = word.end {
+                        block(index, word, start: start, end: end, track: rowHeight, row: tracks.rows[index] ?? 0)
+                            .offset(y: Double(tracks.rows[index] ?? 0) * rowHeight)
+                    }
                 }
                 if let snapGuide {
-                    Rectangle().fill(.yellow).frame(width: 1.5, height: height - 4)
+                    Rectangle().fill(.yellow).frame(width: 1.5, height: track + 26)
                         .offset(x: (snapGuide - visible.lowerBound) * pointsPerSecond - 0.75)
                         .allowsHitTesting(false)
                 }
             }
-            .frame(width: width, height: height, alignment: .topLeading)
+            .frame(width: width, height: track + 30, alignment: .topLeading)
             .padding(.horizontal, 20)
         }
         .scrollPosition($scrollPosition)
@@ -273,23 +363,27 @@ struct WordTimingEditor: View {
         }
     }
 
-    func block(_ index: Int, _ word: TimedWord, start: Double, end: Double, track: Double) -> some View {
+    func block(_ index: Int, _ word: TimedWord, start: Double, end: Double, track: Double, row: Int) -> some View {
         let blockHeight = min(140, max(56, track * 0.6))
         let x = (start - visible.lowerBound) * pointsPerSecond
         let width = max(6, (end - start) * pointsPerSecond)
         let isSelected = isSelected(index)
+        let playing = playingWords.contains(index)
+        let color = trackColor(row)
         return ZStack {
-            RoundedRectangle(cornerRadius: 6).fill(isSelected ? (index == selection ? AnyShapeStyle(.tint) : AnyShapeStyle(.tint.opacity(0.75))) : AnyShapeStyle(.tint.opacity(0.35)))
-            Text(word.text).font(.callout.weight(.medium)).lineLimit(1).foregroundStyle(isSelected ? .white : .primary).padding(.horizontal, 8)
+            RoundedRectangle(cornerRadius: 6).fill(color.opacity(playing || index == selection ? 1 : isSelected ? 0.75 : 0.35))
+            Text(word.text).font(.callout.weight(.medium)).lineLimit(1).foregroundStyle(isSelected || playing ? .white : .primary).padding(.horizontal, 8)
         }
         .frame(width: width, height: blockHeight)
         .contentShape(.rect)
         .gesture(dragGesture(index, edge: .both))
         .overlay(alignment: .leading) { handle(index, .start, height: blockHeight) }
         .overlay(alignment: .trailing) { handle(index, .end, height: blockHeight) }
+        .overlay { if isSelected { RoundedRectangle(cornerRadius: 6).strokeBorder(.white, lineWidth: 2) } }
         .offset(x: x, y: 30 + (track - blockHeight) / 2)
         .onTapGesture { select(index, modifiers: NSEvent.modifierFlags) }
-        .help("\(stamp(start)) – \(stamp(end))")
+        .contextMenu { trackMenu(index) }
+        .help("Track \(row + 1) · \(stamp(start)) – \(stamp(end))")
     }
 
     func handle(_ index: Int, _ edge: Edge, height: Double) -> some View {
@@ -765,6 +859,38 @@ struct WordTimingEditor: View {
     func stamp(_ value: Double?) -> String { value.map { String(format: "%.3f s", $0) } ?? "…" }
 }
 
+/// Follows lyric order: an overlapping word starts a new track and subsequent words stay there.
+/// Explicit track assignments allow the user to join phrases without changing their timing.
+struct WordTimingTracks {
+    let rows: [Int: Int]
+    let count: Int
+
+    init(_ spans: [(index: Int, start: Double, end: Double)], overrides: [Int: Int] = [:]) {
+        var rows: [Int: Int] = [:]
+        var occupied: [Int: [(start: Double, end: Double)]] = [:]
+        var current = 0
+        for span in spans.sorted(by: { $0.index < $1.index }) {
+            var row = overrides[span.index].map { min(spans.count, max(0, $0)) } ?? current
+            func overlaps(_ start: Double, _ end: Double) -> Bool { span.start < end && start < span.end }
+            while occupied[row, default: []].contains(where: { overlaps($0.start, $0.end) }) ||
+                (overrides[span.index] == nil && spans.contains(where: {
+                    $0.index > span.index && overrides[$0.index] == row && overlaps($0.start, $0.end)
+                })) {
+                row += 1
+            }
+            occupied[row, default: []].append((span.start, span.end))
+            rows[span.index] = row
+            current = row
+        }
+        self.rows = rows
+        count = max(1, (rows.values.max() ?? 0) + 1)
+    }
+
+    static func activeIndices(_ spans: [(index: Int, start: Double, end: Double)], at time: Double) -> Set<Int> {
+        Set(spans.filter { $0.start <= time && time < $0.end }.map(\.index))
+    }
+}
+
 /// Repaint only the viewport playhead, without invalidating the song-wide SwiftUI layout each frame.
 private struct TimingPlayhead: NSViewRepresentable {
     let playback: MusicPlayback
@@ -817,30 +943,28 @@ private struct TimingPlayhead: NSViewRepresentable {
     }
 }
 
-/// Tracks which word is under the playhead. Playback time isn't observable, so this polls it in a
-/// tiny view and only writes `index` when the word changes, keeping the word strip from redrawing every frame.
+/// Polls playback in a tiny view and updates only when the set of active words changes.
 private struct PlayingWordTracker: View {
     let playback: MusicPlayback
     let words: [TimedWord]
-    @Binding var index: Int?
+    @Binding var indices: Set<Int>
 
     var body: some View {
         Color.clear.task(id: words) {
             while !Task.isCancelled {
                 let next = current()
-                if next != index { index = next }
+                if next != indices { indices = next }
                 do { try await Task.sleep(for: .milliseconds(33)) } catch { return }
             }
         }
     }
 
-    func current() -> Int? {
-        guard playback.isPlaying else { return nil }
-        let time = playback.time
-        return words.firstIndex { word in
-            guard let start = word.start, let end = word.end else { return false }
-            return start <= time && time < end
-        }
+    func current() -> Set<Int> {
+        guard playback.isPlaying else { return [] }
+        return WordTimingTracks.activeIndices(words.enumerated().compactMap { index, word in
+            guard let start = word.start, let end = word.end else { return nil }
+            return (index, start, end)
+        }, at: playback.time)
     }
 }
 

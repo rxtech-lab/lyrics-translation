@@ -8,6 +8,8 @@ struct TimedWord: Codable, Hashable {
     var space = false
     var start: Double?
     var end: Double?
+    /// Explicit editor track, saved only when the user groups words onto a track.
+    var timingTrack: Int?
 }
 
 /// Apple Music catalog song linked to the document.
