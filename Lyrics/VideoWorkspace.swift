@@ -8,7 +8,7 @@ import RxRemotion
 /// Layout: `src/index.tsx` (app entry) and `src/song.json` (timings) belong to the app; everything else under
 /// `src/` belongs to the agent, with `src/video.tsx` exporting the root `Video` component.
 @MainActor final class VideoWorkspace {
-    nonisolated static let toolNames: Set<String> = ["list_files", "read_file", "write_file", "edit_file", "delete_file", "import_image", "check_video"]
+    nonisolated static let toolNames: Set<String> = ["list_files", "read_file", "write_file", "edit_file", "delete_file", "import_image", "generate_image", "check_video"]
     static let reserved: Set<String> = ["index.tsx", "song.json"]
     static let extensions: Set<String> = ["tsx", "ts", "jsx", "js", "css"]
     private static let maxFileSize = 200_000, maxFiles = 24
@@ -21,14 +21,21 @@ import RxRemotion
     private let engine = RemotionEngine()
     private let probeFrame: Int
     private let requiresArtwork: Bool
+    private let artwork: ArtworkConfiguration
+    private let artworkKey: String
+    private var generatingImage = false
+    private var imageTask: Task<Data, Error>?
+    private var closed = false
 
-    init(root: URL, probeFrame: Int, requiresArtwork: Bool = false) {
+    init(root: URL, probeFrame: Int, requiresArtwork: Bool = false, artwork: ArtworkConfiguration = .load()) {
         self.root = root.resolvingSymlinksInPath()
         self.probeFrame = probeFrame
         self.requiresArtwork = requiresArtwork
+        self.artwork = artwork
+        self.artworkKey = artwork.provider == .codex ? "" : ArtworkKeychain.read(artwork)
     }
 
-    func close() { engine.closeAll() }
+    func close() { closed = true; imageTask?.cancel(); engine.closeAll() }
 
     /// Agent-owned files keyed by path relative to src/.
     func files() -> [String: String] {
@@ -120,6 +127,56 @@ import RxRemotion
         } catch { return .error(error.localizedDescription) }
     }
 
+    private func generateImage(_ arguments: JSONValue) async -> AgentToolResult {
+        guard !closed else { return .error("The video workspace is closed.") }
+        guard !generatingImage else { return .error("An image is already generating. Wait for it before starting another layer.") }
+        guard let prompt = arguments["prompt"]?.stringValue, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              prompt.count <= 16000, let name = arguments["name"]?.stringValue,
+              Self.validAssetName(name), name.hasSuffix(".png") else {
+            return .error("Provide a prompt (up to 16000 characters) and a unique .png filename.")
+        }
+        generatingImage = true
+        defer { generatingImage = false }
+        do {
+            let saved = try assets()
+            guard saved[name] == nil, saved.count < 80 else { throw ArtworkError("Use a new layer filename; at most 80 layers are allowed.") }
+            var reference: URL?
+            if let name = arguments["reference_name"]?.stringValue {
+                guard Self.validAssetName(name), saved[name] != nil else { throw ArtworkError("reference_name must be an existing scene asset filename.") }
+                reference = assetDirectory.appendingPathComponent(name)
+            }
+            let transparent = arguments["transparent"]?.boolValue ?? true
+            onActivity?("Generating \(name) with \(artwork.provider.rawValue)…")
+            let config = artwork, key = artworkKey
+            let referenceData = try reference.map { try Data(contentsOf: $0) }
+            let generation = Task<Data, Error> {
+                if config.provider == .codex {
+                    return try await CodexArtwork.generate(prompt: ArtworkAPI.prompt(prompt, transparent: transparent, native: true), reference: reference)
+                }
+                return try await ArtworkAPI(configuration: config, key: key).generate(prompt: prompt, transparent: transparent, reference: referenceData)
+            }
+            imageTask = generation
+            defer { imageTask = nil }
+            let raw = try await withTaskCancellationHandler { try await generation.value } onCancel: { generation.cancel() }
+            try Task.checkCancellation()
+            guard !closed else { throw CancellationError() }
+            onActivity?("Preparing scene layer \(name)…")
+            let keyed = transparent && config.provider != .codex && config.model?.nativeTransparency != true
+            // Image decoding and keying can be expensive; keep it off the UI executor.
+            let png = try await Task.detached(priority: .userInitiated) {
+                try ArtworkPNG.encode(raw, keyGreen: keyed, requireAlpha: transparent)
+            }.value
+            try Task.checkCancellation()
+            guard !closed else { throw CancellationError() }
+            let latest = try assets()
+            guard latest[name] == nil, latest.count < 80,
+                  latest.values.reduce(png.count, { $0 + $1.count }) <= 256_000_000 else { throw ArtworkError("Scene artwork exceeds the video's asset limit.") }
+            try Self.writeAssets([name: png], to: root)
+            onActivity?("Saved scene layer \(name)")
+            return .text("Saved public/scenes/\(name). Background: \(transparent ? "transparent alpha" : "opaque"). Use <Img src={staticFile('scenes/\(name)')} />. The layer is already imported and preserved for preview, revisions and export.")
+        } catch { return .error(error.localizedDescription) }
+    }
+
     /// Maps an agent path ("video.tsx", "src/parts/Title.tsx") into src/, refusing escapes and app-owned files.
     private func resolve(_ raw: String, writing: Bool) throws -> URL {
         var path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -147,7 +204,7 @@ import RxRemotion
         do {
             if requiresArtwork {
                 guard try assets().count >= 3 else {
-                    return "Anime Layers requires generated raster artwork: import the environment, transparent character and foreground layers with import_image. Use native Codex image generation; do not substitute SVG scenery or people. If it is unavailable, report the limitation."
+                    return "Anime Layers requires generated raster artwork. Call generate_image for environment plates (transparent=false), characters and foreground cutouts (transparent=true). It saves each layer directly. Do not substitute SVG scenery or people. If generation fails, report the tool error and check Artwork Settings."
                 }
                 guard FileManager.default.fileExists(atPath: src.appendingPathComponent("scenes.ts").path) else {
                     return "Create src/scenes.ts with the lyric-timed scene plan and layer filenames (rule 18)."
@@ -212,8 +269,18 @@ import RxRemotion
                      annotations: .destructive) { [self] arguments, _ in
                 await self.delete(arguments["path"]?.stringValue ?? "")
             },
+            .dynamic(name: "generate_image",
+                     description: "Generate a raster scene layer using the user's configured Codex or API image provider. Works from Claude Code and other directors. Saves a PNG directly to public/scenes/; no import_image call needed. Transparency defaults to true for cutouts. Set transparent=false for full backgrounds. Generate one layer at a time.",
+                     inputSchema: ["type": "object", "properties": [
+                        "prompt": ["type": "string", "description": "Detailed art direction for this single layer."],
+                        "name": ["type": "string", "description": "New .png filename, e.g. scene-01-character.png."],
+                        "transparent": ["type": "boolean", "description": "Default true. Use false for full-bleed background plates."],
+                        "reference_name": ["type": "string", "description": "Optional existing scene asset filename for character/style continuity. Model must support image inputs."]
+                     ], "required": ["prompt", "name"]]) { [self] arguments, _ in
+                await self.generateImage(arguments)
+            },
             .dynamic(name: "import_image",
-                     description: "Copy a generated raster layer into public/scenes/ for durable preview and export. Call the native Codex image generation tool first, then pass its saved local path. Never send base64. Use transparent PNG for characters and foreground objects.",
+                     description: "Copy a generated raster layer into public/scenes/ for durable preview and export. For images generated outside generate_image, pass the saved local path. Never send base64. Use transparent PNG for characters and foreground objects.",
                      inputSchema: ["type": "object", "properties": [
                         "source_path": ["type": "string", "description": "Local path returned by native image generation."],
                         "name": ["type": "string", "description": "Unique scene-layer filename, e.g. scene-01-character.png."]
