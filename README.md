@@ -25,3 +25,17 @@ Open **Lyric Video** in the toolbar and choose Original or Translation. Use **Pr
 Uses the sibling `../rxlab/film-workflow/Packages/RxRemotion` package (RxRemotion and RxRemotionUI), with bundled Remotion compiled in WebKit and native AVFoundation export. No Node runtime, API key or upload is needed. Temporary compositions and audio copies are removed when the sheet closes; video settings/audio selection are session-only.
 
 Apple Music lyric-video integration: unsigned Debug build passed; live MusicKit authorization, playback synchronization and movie export have not been verified in this change.
+
+### Artwork for agent-directed videos
+
+In **Lyric Video → Artwork → Configure…**, select **Codex**, **Vercel AI Gateway**, or an **OpenAI-compatible** base URL. API providers offer **Load Image Models** and a model picker filtered by image *output* capabilities, not vision inputs. OpenAI model catalogs without capabilities use known GPT Image/DALL-E family names as a fallback. Keys are stored in this Mac's Keychain, never in documents or agent prompts. Leaving the key empty uses `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` for Gateway, or `OPENAI_API_KEY` for compatible endpoints. Codex uses the installed CLI and its existing login.
+
+Every video director, including Claude Code, receives the same `generate_image` workspace tool. It accepts `prompt`, a unique PNG `name`, optional `reference_name` (an existing scene asset), and `transparent` (defaults to true). Set `transparent=false` for full background plates. Image results are normalized to PNG and saved directly in `public/scenes/`, then preserved with the video for preview, refinement and export. Reference editing depends on the selected model's image-input support. Generation failures are returned to the director without silently changing providers.
+
+GPT Image models and Codex request native transparency. Other providers receive a pure-green background instruction, then native Swift chroma keying removes green, including enclosed gaps, with softened edges and spill suppression. Green subjects and translucent details can need regeneration or manual review. Cutouts without usable alpha are rejected. The local image adapter uses the provider's image endpoints or chat endpoint according to the model's advertised output capabilities.
+
+Run artwork fixtures with `swiftc -swift-version 6 -module-cache-path /tmp/LyricArtworkModules Lyrics/ImageGeneration.swift scripts/test-artwork.swift -o /tmp/test-lyric-artwork && /tmp/test-lyric-artwork`. These tests cover provider request shapes, model filtering, error handling, chroma keying and PNG validation; they do not establish live provider/account access.
+
+The director progress overlay shows provider-reported output tokens and the latest tool call. **Agent Activity…** opens a dedicated sheet with the latest 40 calls, completion states and errors. Token counts update at provider usage boundaries, not for every streamed character. Repeated tool failures stop the turn after three consecutive failures or three failures of the same tool.
+
+All image generation requests use POST. Gateway image-only models use `/v4/ai/image-model` with the Gateway model/protocol headers and JSON reference files; multimodal models use Chat Completions. OpenAI-compatible providers retain their image generation/edit endpoints. A live check on November 11, 2026 generated and validated a transparent PNG using the saved Gateway configuration; this does not verify a complete Claude-directed video or the activity sheet during a live run.

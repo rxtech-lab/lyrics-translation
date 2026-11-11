@@ -153,6 +153,15 @@ enum PipelineError: LocalizedError {
     var running = false
     var status = ""
     var transcript = ""
+    struct ToolActivity: Identifiable {
+        let id: String
+        let name: String
+        var finished = false
+        var error: String?
+    }
+    var toolActivity: [ToolActivity] = []
+    var generatedTokens: Int?
+    var agentActivity = ""
     var error: String?
     private var pendingTranslationIDs: Set<UUID> = []
     /// Extra direction for the current (re)translation, kept so a retry honours it too.
@@ -221,6 +230,11 @@ enum PipelineError: LocalizedError {
              permissions: (any PermissionResolving)? = nil, disallowedTools: [String] = [],
              idleTimeout: Duration? = nil, imageGeneration: Bool = false) async throws -> String {
         try Task.checkCancellation()
+        toolActivity = []; generatedTokens = nil; agentActivity = "Connecting to \(setting.provider)…"
+        var messageTokens = 0
+        var countedMessages: Set<String> = []
+        var consecutiveToolErrors = 0
+        var failuresByTool: [String: Int] = [:]
         let client = setting.client(imageGeneration: imageGeneration), thread = AgentThreadID(), turnID = UUID()
         active = client; turn = turnID
         guard await client.isAvailable() else { throw PipelineError.invalid("Install and authenticate \(setting.provider) before running this agent.") }
@@ -264,15 +278,45 @@ enum PipelineError: LocalizedError {
             watch.last = .now
             if watch.timedOut { await client.endSession(thread: thread); throw stalled() }
             switch event {
-            case .textDelta(let text): result += text; transcript += text
-            case .toolCallStarted(_, let name): transcript += "\n[tool] \(name)\n"
-            case .toolCallResult(_, let content, let isError) where isError: transcript += "\n[tool error] \(content.prefix(600))\n"
+            case .textDelta(let text):
+                result += text; transcript += text
+                agentActivity = "\(setting.provider) is responding…"
+            case .toolCallStarted(let id, let name):
+                transcript += "\n[tool] \(name)\n"
+                agentActivity = "Calling \(MCPToolName.bare(name))…"
+                if !toolActivity.contains(where: { $0.id == id }) {
+                    toolActivity.append(ToolActivity(id: id, name: MCPToolName.bare(name)))
+                    if toolActivity.count > 40 { toolActivity.removeFirst() }
+                }
+            case .toolCallResult(let id, let content, let isError):
+                if let index = toolActivity.firstIndex(where: { $0.id == id }) {
+                    toolActivity[index].finished = true
+                    toolActivity[index].error = isError ? String(content.prefix(600)) : nil
+                }
+                agentActivity = isError ? "Tool failed — waiting for the agent…" : "Waiting for \(setting.provider)…"
+                if isError {
+                    transcript += "\n[tool error] \(content.prefix(600))\n"
+                    consecutiveToolErrors += 1
+                    let name = toolActivity.first(where: { $0.id == id })?.name ?? "unknown"
+                    failuresByTool[name, default: 0] += 1
+                    if consecutiveToolErrors >= 3 || failuresByTool[name, default: 0] >= 3 {
+                        await client.cancel(turn: turnID); await client.endSession(thread: thread)
+                        throw PipelineError.invalid("Stopped after repeated tool failures. Last error: \(content.prefix(600))")
+                    }
+                } else { consecutiveToolErrors = 0 }
+            case .messageEnded(let id, let info):
+                if let id, let info, countedMessages.insert(id).inserted {
+                    messageTokens += info.outputTokens
+                    generatedTokens = max(generatedTokens ?? 0, messageTokens)
+                }
             case .permissionRequested(let request): transcript += "\n[permission] \(request.toolName) \(request.toolInput.keys.sorted().joined(separator: ","))\n"
             case .sessionStarted(let started): reportedModel = started.model
-            case .usage(let info): usage = info
+            case .usage(let info):
+                usage = info
+                generatedTokens = max(generatedTokens ?? 0, messageTokens, info.outputTokens)
             case .failed(let failure): await client.endSession(thread: thread); throw PipelineError.invalid(String(describing: failure))
             case .turnEnded(let outcome):
-                if let total = outcome.usage { usage = total }
+                if let total = outcome.usage { usage = total; generatedTokens = total.outputTokens }
                 if outcome.isError { await client.endSession(thread: thread); throw PipelineError.invalid("Agent reported an unsuccessful turn.") }
             default: break
             }

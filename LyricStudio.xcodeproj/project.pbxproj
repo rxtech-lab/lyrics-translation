@@ -8,7 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		076AB1E3228F4E326D2B3F69 /* LyricThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1DCB0966AD67998C3FBF3C1 /* LyricThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		16E983352FF7BBC8B5364376 /* ImageGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3AA1CF768A29321C0B3ABD5 /* ImageGeneration.swift */; };
 		28CCD6FC3A1CDFC4B8404061 /* LyricVideoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF417908B8B2C1220140EE5 /* LyricVideoSheet.swift */; };
+		2AFCD689D1C42A09A5681966 /* CodexArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 355887EF947D75E0A12D7445 /* CodexArtwork.swift */; };
 		32D1EB7681369667012A0D79 /* ConversationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */; };
 		32FB6C7179AAB5D1A6FCA072 /* UsageSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40E3E99C6F9325D6DE4A7CFA /* UsageSheet.swift */; };
 		3A003A9264C417563D53704C /* EditTranslationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8D8F706C74282D245D17B01 /* EditTranslationSheet.swift */; };
@@ -34,6 +36,7 @@
 		AB02F319A10D30F3F881239C /* PreviewSong.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD429D8797E7AA3D1D58321 /* PreviewSong.swift */; };
 		B17C33B070D6112B945FB1B6 /* VideoWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47CD25FE45F6B79F60ACB127 /* VideoWorkspace.swift */; };
 		B1E72B7318602565F58A9F70 /* AgentModelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BDDEB133AA863719362729D /* AgentModelPicker.swift */; };
+		B723A70C67E80792575A1524 /* ArtworkSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9A8D1ED7B674BE4B2ABCD34 /* ArtworkSettingsSheet.swift */; };
 		BD4498008C0D2A03FB33EF41 /* icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E124E93C894B82AC4A039346 /* icon.icon */; };
 		CD1F3B7F728A4C1EFD0335CB /* AppUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE18244C72D78D4BFDE1CE33 /* AppUpdates.swift */; };
 		D7DDC65F73AAA39B7C33A1C4 /* RxAgentSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 995BE55FF01C334E1473E084 /* RxAgentSDK */; };
@@ -90,6 +93,7 @@
 		23A4C11A2D8351D405CC7893 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2B2D4D546A525ECC0798A2A6 /* AutoTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTiming.swift; sourceTree = "<group>"; };
 		2EA983A76DF4E1B78BBAA4CC /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		355887EF947D75E0A12D7445 /* CodexArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexArtwork.swift; sourceTree = "<group>"; };
 		3BE4CCB110D91FF077D114BA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		40E3E99C6F9325D6DE4A7CFA /* UsageSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSheet.swift; sourceTree = "<group>"; };
 		41E289E4E4E3C7CC3094DA0F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -113,6 +117,7 @@
 		BB04147AB4FDCE71EEE9CEF9 /* TranslateLinesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslateLinesSheet.swift; sourceTree = "<group>"; };
 		BBDCBB177FCC372589BE7F21 /* LineDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineDetailView.swift; sourceTree = "<group>"; };
 		C598CF6FB9A05787BF76BFA6 /* LyricStudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LyricStudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D9A8D1ED7B674BE4B2ABCD34 /* ArtworkSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkSettingsSheet.swift; sourceTree = "<group>"; };
 		DE18244C72D78D4BFDE1CE33 /* AppUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdates.swift; sourceTree = "<group>"; };
 		DFC1DB690713CE8D922F7CB1 /* AutoTimingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTimingSheet.swift; sourceTree = "<group>"; };
 		E124E93C894B82AC4A039346 /* icon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = icon.icon; sourceTree = "<group>"; };
@@ -124,6 +129,7 @@
 		EC954C373C7F7FDCBB58DD93 /* LyricDocument.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = LyricDocument.icns; sourceTree = "<group>"; };
 		EE5859B29E98A621AA2EAF44 /* GatewayPricing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayPricing.swift; sourceTree = "<group>"; };
 		F322F8E0233753FD8941057E /* StudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioView.swift; sourceTree = "<group>"; };
+		F3AA1CF768A29321C0B3ABD5 /* ImageGeneration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageGeneration.swift; sourceTree = "<group>"; };
 		F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationSheet.swift; sourceTree = "<group>"; };
 		FA6052EA2FAA44CEB23C2801 /* OriginalLyricsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OriginalLyricsSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -151,13 +157,16 @@
 				4BDDEB133AA863719362729D /* AgentModelPicker.swift */,
 				2EA983A76DF4E1B78BBAA4CC /* App.entitlements */,
 				DE18244C72D78D4BFDE1CE33 /* AppUpdates.swift */,
+				D9A8D1ED7B674BE4B2ABCD34 /* ArtworkSettingsSheet.swift */,
 				2B2D4D546A525ECC0798A2A6 /* AutoTiming.swift */,
 				DFC1DB690713CE8D922F7CB1 /* AutoTimingSheet.swift */,
+				355887EF947D75E0A12D7445 /* CodexArtwork.swift */,
 				F58E5002BC7F17AAAC2D718D /* ConversationSheet.swift */,
 				5A15FC477F95AB0B95522A4E /* ConversationStore.swift */,
 				EBC4922B0D515E12610D21CE /* Document.swift */,
 				E8D8F706C74282D245D17B01 /* EditTranslationSheet.swift */,
 				EE5859B29E98A621AA2EAF44 /* GatewayPricing.swift */,
+				F3AA1CF768A29321C0B3ABD5 /* ImageGeneration.swift */,
 				41E289E4E4E3C7CC3094DA0F /* Info.plist */,
 				7E31492533949AE6A15F18A4 /* Karaoke.swift */,
 				E501A98DEDF6ECFFDAC261DD /* KaraokeSheet.swift */,
@@ -396,13 +405,16 @@
 			files = (
 				B1E72B7318602565F58A9F70 /* AgentModelPicker.swift in Sources */,
 				CD1F3B7F728A4C1EFD0335CB /* AppUpdates.swift in Sources */,
+				B723A70C67E80792575A1524 /* ArtworkSettingsSheet.swift in Sources */,
 				FC0808A4932C0FC24DBE7A1D /* AutoTiming.swift in Sources */,
 				DD0B78743272BBC90E57F193 /* AutoTimingSheet.swift in Sources */,
+				2AFCD689D1C42A09A5681966 /* CodexArtwork.swift in Sources */,
 				32D1EB7681369667012A0D79 /* ConversationSheet.swift in Sources */,
 				8722A7C049BC90E73E79DBF7 /* ConversationStore.swift in Sources */,
 				4F88DD9596FAEF494B5DF4A6 /* Document.swift in Sources */,
 				3A003A9264C417563D53704C /* EditTranslationSheet.swift in Sources */,
 				EAAF49A8BFBA238E638AABE7 /* GatewayPricing.swift in Sources */,
+				16E983352FF7BBC8B5364376 /* ImageGeneration.swift in Sources */,
 				7DBD61F5B5C753D1E0A5139E /* Karaoke.swift in Sources */,
 				74B243B5BEEE8A26055490C3 /* KaraokeSheet.swift in Sources */,
 				48D8342B68BC1F550A017A5E /* LineDetailView.swift in Sources */,
