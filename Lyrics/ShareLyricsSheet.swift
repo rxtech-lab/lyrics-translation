@@ -14,6 +14,8 @@ struct ShareLyricsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var excerpt = false
     @State private var busy = false
+    @State private var uploadedBytes: Int64 = 0
+    @State private var uploadTotal: Int64?
     @State private var loaded = false
     @State private var activity = "Checking publication…"
     @State private var confirmUnpublish = false
@@ -180,7 +182,27 @@ struct ShareLyricsSheet: View {
             .frame(minWidth: 580, minHeight: 680)
             .interactiveDismissDisabled(manager.isAuthenticating)
         }
-        .overlay { if busy { ProgressView(activity).padding(30).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20)) } }
+        .overlay {
+            if busy {
+                VStack(spacing: 12) {
+                    if let total = uploadTotal {
+                        Text(activity).font(.headline)
+                        ProgressView(value: Double(uploadedBytes), total: Double(total))
+                        HStack {
+                            Text("\(Int(Double(uploadedBytes) / Double(total) * 100))%")
+                            Spacer()
+                            Text("\(ByteCountFormatter.string(fromByteCount: uploadedBytes, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))")
+                        }
+                        .font(.caption).monospacedDigit()
+                        if uploadedBytes == total { Text("Waiting for upload confirmation…").font(.caption).foregroundStyle(.secondary) }
+                    } else {
+                        ProgressView(activity)
+                    }
+                }
+                .frame(width: 340).padding(30)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            }
+        }
         .overlay {
             if copied {
                 Label("Link Copied", systemImage: "checkmark.circle.fill")
@@ -393,6 +415,9 @@ struct ShareLyricsSheet: View {
         defer { if scoped { file.stopAccessingSecurityScopedResource() } }
         let values = try file.resourceValues(forKeys: [.fileSizeKey])
         guard let size = values.fileSize, size > 0, size <= 2_147_483_648 else { throw ShareError.videoSize }
+        uploadedBytes = 0
+        uploadTotal = Int64(size)
+        defer { uploadTotal = nil; uploadedBytes = 0 }
         guard let endpoint = URL(string: server + "/api/shares/video-upload"), let id = song.publicationID else { throw ShareError.configuration }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -409,7 +434,10 @@ struct ShareLyricsSheet: View {
         put.timeoutInterval = 3600
         put.setValue("video/mp4", forHTTPHeaderField: "Content-Type")
         put.setValue(String(size), forHTTPHeaderField: "Content-Length")
-        let (_, result) = try await URLSession.shared.upload(for: put, fromFile: file)
+        let progress = VideoUploadProgress { sent in
+            uploadedBytes = max(uploadedBytes, min(sent, Int64(size)))
+        }
+        let (_, result) = try await URLSession.shared.upload(for: put, fromFile: file, delegate: progress)
         guard let code = (result as? HTTPURLResponse)?.statusCode, (200 ..< 300).contains(code) else { throw ShareError.failed }
         return PublishedVideo(key: upload.key, hasAudio: videoHasAudio)
     }

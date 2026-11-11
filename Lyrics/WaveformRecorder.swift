@@ -23,7 +23,37 @@ import Foundation
     /// Peak level (0…1) per bin for each song id.
     @ObservationIgnored private var peaks: [String: [Float]] = [:]
     @ObservationIgnored private var dirtyIDs: Set<String> = []
-    @ObservationIgnored private var users = 0
+    private var users = 0
+    private var pendingSaves = 0
+    var canClearCache: Bool { users == 0 && pendingSaves == 0 }
+
+    func clearCache(file target: URL? = nil) throws {
+        guard canClearCache else { throw CocoaError(.fileWriteFileExists) }
+        if let target {
+            let expectedFolder = URL.applicationSupportDirectory.resolvingSymlinksInPath()
+                .appendingPathComponent("LyricStudio/Waveforms", isDirectory: true)
+            guard Self.folder.resolvingSymlinksInPath().standardizedFileURL == expectedFolder.standardizedFileURL else {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            guard target.deletingLastPathComponent().standardizedFileURL == Self.folder.standardizedFileURL,
+                  target.pathExtension == "waveform" else { throw CocoaError(.fileWriteNoPermission) }
+            if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+            for id in Array(peaks.keys) where Self.file(id).standardizedFileURL == target.standardizedFileURL {
+                peaks.removeValue(forKey: id)
+                dirtyIDs.remove(id)
+                if openBin?.id == id { openBin = nil }
+            }
+            revision += 1
+            return
+        }
+        if FileManager.default.fileExists(atPath: Self.folder.path) {
+            try FileManager.default.removeItem(at: Self.folder)
+        }
+        peaks.removeAll()
+        dirtyIDs.removeAll()
+        openBin = nil
+        revision += 1
+    }
     @ObservationIgnored private var capture: SystemAudioCapture?
     @ObservationIgnored private var captureTask: Task<Void, Never>?
     @ObservationIgnored private var clockTask: Task<Void, Never>?
@@ -257,12 +287,16 @@ import Foundation
         guard !dirtyIDs.isEmpty else { return }
         let snapshot = dirtyIDs.compactMap { id in peaks[id].map { (id, $0) } }
         dirtyIDs = []
-        Task.detached(priority: .utility) {
-            try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
-            for (id, bins) in snapshot {
-                let data = Data(bins.map { $0 < 0 ? 0 : UInt8(1 + (min(1, $0) * 254).rounded()) })
-                try? data.write(to: Self.file(id), options: .atomic)
-            }
+        pendingSaves += 1
+        Task {
+            await Task.detached(priority: .utility) {
+                try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+                for (id, bins) in snapshot {
+                    let data = Data(bins.map { $0 < 0 ? 0 : UInt8(1 + (min(1, $0) * 254).rounded()) })
+                    try? data.write(to: Self.file(id), options: .atomic)
+                }
+            }.value
+            pendingSaves -= 1
         }
     }
 }

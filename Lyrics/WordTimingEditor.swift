@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Precise timing for one line: drag word blocks or their edges on a zoomable timeline, type exact times,
+/// Precise line editing with every timed word in the song on a zoomable timeline: drag words or edges, type exact times,
 /// nudge in milliseconds, set edges at the playhead, and audition a single word or the whole line.
 struct WordTimingEditor: View {
     let lineCount: Int
@@ -14,6 +14,8 @@ struct WordTimingEditor: View {
     @State var line: Int
     @State private var words: [TimedWord] = []
     @State private var original: [TimedWord] = []
+    @State private var songWords: [[TimedWord]] = []
+    /// -1 means no word is selected.
     @State private var selection = 0
     /// Words selected alongside the primary `selection`; dragging any selected word moves them all.
     @State private var extraSelection: Set<Int> = []
@@ -66,7 +68,7 @@ struct WordTimingEditor: View {
     static let snapDistance: Double = 8
 
     var selected: TimedWord? { words.indices.contains(selection) ? words[selection] : nil }
-    var group: Set<Int> { extraSelection.union([selection]) }
+    var group: Set<Int> { extraSelection.union(words.indices.contains(selection) ? [selection] : []) }
     func isSelected(_ index: Int) -> Bool { index == selection || extraSelection.contains(index) }
 
     var body: some View {
@@ -86,16 +88,19 @@ struct WordTimingEditor: View {
         .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
             // ⌘← / ⌘→ belong to the Previous/Next Line toolbar buttons.
             guard !press.modifiers.contains(.command) else { return .ignored }
-            select(selection + (press.key == .leftArrow ? -1 : 1)); return .handled
+            let next = selected == nil ? (press.key == .leftArrow ? words.count - 1 : 0) : selection + (press.key == .leftArrow ? -1 : 1)
+            select(next); return .handled
         }
         .onKeyPress(.return) { auditionWord(); return .handled }
         .onKeyPress(.space) { toggle(); return .handled }
         .onKeyPress("[") { setAtPlayhead(.start); return .handled }
         .onKeyPress("]") { setAtPlayhead(.end); return .handled }
-        .onKeyPress(.escape) { extraSelection = []; return .handled }
+        .onKeyPress(.escape) { deselectAll(); return .handled }
         .onKeyPress(characters: ["a"]) { press in
             guard press.modifiers.contains(.command) else { return .ignored }
-            extraSelection = Set(words.indices.filter { words[$0].isTimed }).subtracting([selection])
+            let timed = words.indices.filter { words[$0].isTimed }
+            if selected == nil { selection = timed.first ?? -1 }
+            extraSelection = Set(timed).subtracting([selection])
             return .handled
         }
         .onAppear { open(line); focused = true; updateWaveform() }
@@ -148,7 +153,7 @@ struct WordTimingEditor: View {
                 Spacer(minLength: 0)
                 lineNavigator
             }
-            Text("Drag a word to move it, drag its edges to trim. Drag the empty track or ⇧/⌘-click to select several; right-click the selection to merge tracks. ← → select · ⌘← ⌘→ previous/next line · [ ] set start/end at playhead · Return plays the word")
+            Text("Click a word from another line to edit it. Drag a word to move it, drag its edges to trim. Drag the empty track or ⇧/⌘-click to select several; right-click the selection to merge tracks. ← → select · ⌘← ⌘→ previous/next line · [ ] set start/end at playhead · Return plays the word")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,16 +203,22 @@ struct WordTimingEditor: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20).padding(.vertical, 10)
+        .background { Color.clear.contentShape(.rect).onTapGesture { deselectAll() } }
         .background { PlayingWordTracker(playback: playback, words: words, indices: $playingWords) }
     }
 
+    var timeline: SongWordTimeline {
+        var lines = songWords
+        if lines.indices.contains(line) { lines[line] = words }
+        return SongWordTimeline(lines: lines, pointsPerSecond: pointsPerSecond)
+    }
+
+    /// Track operations still act on the active line, using the song timeline's row numbers.
     var trackLayout: WordTimingTracks {
-        WordTimingTracks(words.enumerated().compactMap { index, word in
-            guard let start = word.start, let end = word.end else { return nil }
-            return (index: index, start: start, end: max(end, start + 6 / pointsPerSecond))
-        }, overrides: Dictionary(uniqueKeysWithValues: words.enumerated().compactMap { index, word in
-            word.timingTrack.map { (index, $0) }
-        }))
+        let timeline = timeline
+        return WordTimingTracks(rows: Dictionary(uniqueKeysWithValues: timeline.entries.filter { $0.line == line }.map {
+            ($0.word, timeline.tracks.rows[$0.id] ?? 0)
+        }), count: timeline.tracks.count)
     }
 
     func trackColor(_ row: Int) -> Color {
@@ -274,7 +285,7 @@ struct WordTimingEditor: View {
         report("Selected words merged into Track \(mergeTrack + 1)")
     }
 
-    /// Timeline that grows with the window and adds tracks for overlapping words.
+    /// Song-wide timeline that grows with the window and adds tracks for overlapping words.
     var lane: some View {
         GeometryReader { proxy in
             lane(height: max(130, proxy.size.height - 20))
@@ -284,7 +295,8 @@ struct WordTimingEditor: View {
 
     func lane(height: Double) -> some View {
         let width = max(1, (visible.upperBound - visible.lowerBound) * pointsPerSecond)
-        let tracks = trackLayout
+        let timeline = timeline
+        let tracks = timeline.tracks
         let track = max(height - 30, Double(tracks.count) * 64 + 16)
         let rowHeight = track / Double(tracks.count)
         return ScrollView([.horizontal, .vertical]) {
@@ -315,10 +327,14 @@ struct WordTimingEditor: View {
                         .offset(x: (low - visible.lowerBound) * pointsPerSecond, y: 30)
                         .allowsHitTesting(false)
                 }
-                ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                    if let start = word.start, let end = word.end {
-                        block(index, word, start: start, end: end, track: rowHeight, row: tracks.rows[index] ?? 0)
-                            .offset(y: Double(tracks.rows[index] ?? 0) * rowHeight)
+                ForEach(timeline.entries) { entry in
+                    let row = tracks.rows[entry.id] ?? 0
+                    if entry.line == line {
+                        block(entry.word, entry.value, start: entry.start, end: entry.end, track: rowHeight, row: row)
+                            .offset(y: Double(row) * rowHeight)
+                    } else {
+                        contextBlock(entry, track: rowHeight, row: row)
+                            .offset(y: Double(row) * rowHeight)
                     }
                 }
                 if let snapGuide {
@@ -329,6 +345,7 @@ struct WordTimingEditor: View {
             }
             .frame(width: width, height: track + 30, alignment: .topLeading)
             .padding(.horizontal, 20)
+            .background { Color.clear.contentShape(.rect).onTapGesture { deselectAll() } }
         }
         .scrollPosition($scrollPosition)
         .simultaneousGesture(
@@ -361,6 +378,24 @@ struct WordTimingEditor: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+    }
+
+    /// Other lines remain visible and can be opened without moving the timeline.
+    func contextBlock(_ entry: SongWordTimeline.Entry, track: Double, row: Int) -> some View {
+        Text(entry.value.text)
+            .font(.callout.weight(.medium)).lineLimit(1)
+            .padding(.horizontal, 8)
+            .frame(width: max(6, (entry.end - entry.start) * pointsPerSecond), height: min(140, max(56, track * 0.6)))
+            .background(trackColor(row).opacity(0.18), in: .rect(cornerRadius: 6))
+            .contentShape(.rect)
+            .onTapGesture {
+                open(entry.line, fitting: false)
+                select(entry.word)
+            }
+            .offset(x: (entry.start - visible.lowerBound) * pointsPerSecond,
+                    y: 30 + (track - min(140, max(56, track * 0.6))) / 2)
+            .help("Line \(entry.line + 1) · \(stamp(entry.start)) – \(stamp(entry.end)) · Click to edit")
+            .accessibilityLabel("Line \(entry.line + 1), \(entry.value.text)")
     }
 
     func block(_ index: Int, _ word: TimedWord, start: Double, end: Double, track: Double, row: Int) -> some View {
@@ -479,7 +514,8 @@ struct WordTimingEditor: View {
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
         } else {
-            Text("This line has no words to time.").foregroundStyle(.secondary).padding(20)
+            Text(words.isEmpty ? "This line has no words to time." : "Select a word to edit its timing.")
+                .foregroundStyle(.secondary).padding(20)
         }
     }
 
@@ -504,16 +540,17 @@ struct WordTimingEditor: View {
 
     // MARK: Editing
 
-    func open(_ index: Int) {
+    func open(_ index: Int, fitting: Bool = true) {
         guard index >= 0, index < lineCount else { return }
         stopAudition()
+        if songWords.count != lineCount { songWords = (0..<lineCount).map(load) }
         line = index
         words = load(index)
         original = words
         committed = words
         selection = words.firstIndex { !$0.isTimed } ?? 0
         extraSelection = []
-        fit()
+        if fitting { fit() }
         focused = true
     }
 
@@ -524,6 +561,7 @@ struct WordTimingEditor: View {
         if undoStack.count > 200 { undoStack.removeFirst() }
         redoStack.removeAll()
         committed = words
+        if songWords.indices.contains(line) { songWords[line] = words }
         save(line, words)
     }
 
@@ -545,17 +583,27 @@ struct WordTimingEditor: View {
         let replaced = Snapshot(line: line, words: words, selection: selection)
         words = snapshot.words
         committed = snapshot.words
-        selection = words.indices.contains(snapshot.selection) ? snapshot.selection : 0
+        selection = words.indices.contains(snapshot.selection) ? snapshot.selection : -1
         extraSelection = []
+        if songWords.indices.contains(line) { songWords[line] = words }
         save(line, words)
         if words.indices.contains(selection), let start = words[selection].start { reveal(start) }
         return replaced
     }
 
+    func deselectAll() {
+        selection = -1
+        extraSelection = []
+        focused = true
+    }
+
     /// Plain click selects one word; ⇧ extends a range from the current word; ⌘ toggles a word.
     func select(_ index: Int, modifiers: NSEvent.ModifierFlags = []) {
         guard words.indices.contains(index) else { return }
-        if modifiers.contains(.shift) {
+        if selected == nil {
+            selection = index
+            extraSelection = []
+        } else if modifiers.contains(.shift) {
             let range = min(selection, index)...max(selection, index)
             extraSelection.formUnion(range.filter { words[$0].isTimed || $0 == index })
             extraSelection.insert(selection)
@@ -564,6 +612,7 @@ struct WordTimingEditor: View {
         } else if modifiers.contains(.command) {
             if index == selection {
                 if let next = extraSelection.min() { extraSelection.remove(next); selection = next }
+                else { deselectAll() }
             } else if extraSelection.contains(index) {
                 extraSelection.remove(index)
             } else {
@@ -595,7 +644,7 @@ struct WordTimingEditor: View {
                     return s < high && e > low
                 }
                 let all = marquee.base.union(hits)
-                guard let first = hits.first ?? all.min() else { extraSelection = []; return }
+                guard let first = hits.first ?? all.min() else { deselectAll(); return }
                 selection = first
                 extraSelection = all.subtracting([first])
             }
@@ -608,7 +657,8 @@ struct WordTimingEditor: View {
         let low = max(0, (times.min() ?? playback.time) - 0.75)
         let high = (times.max() ?? (playback.time + 5)) + 0.75
         pointsPerSecond = min(1200, max(60, max(1, viewportWidth - 40) / max(0.5, high - low)))
-        visible = 0...max(duration, high + 30)
+        let songEnd = timeline.entries.map(\.end).max() ?? high
+        visible = 0...max(duration, max(high, songEnd) + 30)
         // Wait for the new content width before positioning the scroll view.
         DispatchQueue.main.async {
             scrollPosition.scrollTo(x: low * pointsPerSecond)
@@ -813,6 +863,7 @@ struct WordTimingEditor: View {
 
     /// Clicking the ruler or empty track moves the playhead there and starts playing.
     func playFrom(_ seconds: Double) {
+        deselectAll()
         auditionTask?.cancel(); auditionTask = nil
         playback.seek(to: max(0, seconds))
         guard !playback.isPlaying else { return }
@@ -859,24 +910,68 @@ struct WordTimingEditor: View {
     func stamp(_ value: Double?) -> String { value.map { String(format: "%.3f s", $0) } ?? "…" }
 }
 
-/// Follows lyric order: an overlapping word starts a new track and subsequent words stay there.
+/// Stable song/word addresses keep context words separate from the active line's selection and undo.
+struct SongWordTimeline {
+    struct Entry: Identifiable {
+        let id: Int
+        let line: Int
+        let word: Int
+        let value: TimedWord
+        let start: Double
+        let end: Double
+    }
+
+    let entries: [Entry]
+    let tracks: WordTimingTracks
+
+    init(lines: [[TimedWord]], pointsPerSecond: Double) {
+        var entries: [Entry] = []
+        var nextID = 0
+        for (line, words) in lines.enumerated() {
+            for (word, value) in words.enumerated() {
+                defer { nextID += 1 }
+                guard let start = value.start, let end = value.end else { continue }
+                entries.append(Entry(id: nextID, line: line, word: word, value: value, start: start, end: end))
+            }
+        }
+        self.entries = entries
+        tracks = WordTimingTracks(entries.map {
+            (index: $0.id, start: $0.start, end: max($0.end, $0.start + 6 / pointsPerSecond))
+        }, overrides: Dictionary(uniqueKeysWithValues: entries.compactMap { entry in
+            entry.value.timingTrack.map { (entry.id, $0) }
+        }))
+    }
+}
+
+/// Keeps a phrase on its current track, reusing an available earlier track when the next word overlaps.
 /// Explicit track assignments allow the user to join phrases without changing their timing.
 struct WordTimingTracks {
     let rows: [Int: Int]
     let count: Int
+
+    init(rows: [Int: Int], count: Int) {
+        self.rows = rows
+        self.count = count
+    }
 
     init(_ spans: [(index: Int, start: Double, end: Double)], overrides: [Int: Int] = [:]) {
         var rows: [Int: Int] = [:]
         var occupied: [Int: [(start: Double, end: Double)]] = [:]
         var current = 0
         for span in spans.sorted(by: { $0.index < $1.index }) {
-            var row = overrides[span.index].map { min(spans.count, max(0, $0)) } ?? current
+            let preferred = overrides[span.index].map { min(spans.count, max(0, $0)) } ?? current
             func overlaps(_ start: Double, _ end: Double) -> Bool { span.start < end && start < span.end }
-            while occupied[row, default: []].contains(where: { overlaps($0.start, $0.end) }) ||
-                (overrides[span.index] == nil && spans.contains(where: {
-                    $0.index > span.index && overrides[$0.index] == row && overlaps($0.start, $0.end)
-                })) {
-                row += 1
+            func available(_ row: Int) -> Bool {
+                !occupied[row, default: []].contains(where: { overlaps($0.start, $0.end) }) &&
+                    !(overrides[span.index] == nil && spans.contains(where: {
+                        $0.index > span.index && overrides[$0.index] == row && overlaps($0.start, $0.end)
+                    }))
+            }
+            var row = preferred
+            if !available(row) {
+                // A new overlap can return to a free earlier track instead of growing the stack.
+                row = 0
+                while !available(row) { row += 1 }
             }
             occupied[row, default: []].append((span.start, span.end))
             rows[span.index] = row

@@ -270,6 +270,7 @@ struct LyricDocument: FileDocument {
             .background(DocumentWindowTabs())
     }
         .commands { CommandGroup(after: .appInfo) { Button("Check for Updates…") { updates.check() }.disabled(!updates.available) } }
+        Settings { AppSettingsView() }
     }
 }
 
