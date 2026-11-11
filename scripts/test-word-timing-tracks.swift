@@ -22,6 +22,17 @@ import Foundation
         precondition(WordTimingTracks.activeIndices(phrase, at: 1.7) == [4])
         precondition(WordTimingTracks.activeIndices(phrase, at: 2.1).isEmpty)
 
+        // Successive overlaps reuse earlier tracks; the rest of each phrase stays together.
+        let alternating = WordTimingTracks([
+            (0, 0, 2), (1, 1, 3), (2, 3, 5), (3, 4, 6), (4, 6, 8), (5, 7, 9)
+        ])
+        precondition(alternating.count == 2)
+        precondition(alternating.rows == [0: 0, 1: 1, 2: 1, 3: 0, 4: 0, 5: 1])
+
+        // A free earlier track reserved for an explicitly grouped word cannot be reused.
+        let reserved = WordTimingTracks([(0, 0, 2), (1, 1, 4), (2, 3, 5), (3, 3, 5)], overrides: [3: 0])
+        precondition(reserved.rows == [0: 0, 1: 1, 2: 2, 3: 0])
+
         let merged = WordTimingTracks(phrase, overrides: [0: 0, 1: 0, 2: 0, 3: 1, 4: 0])
         precondition(merged.rows == [0: 0, 1: 0, 2: 0, 3: 1, 4: 0])
         // If later timing edits create an overlap on an explicitly assigned row, keep words visible.
@@ -40,6 +51,18 @@ import Foundation
                 precondition(dense.rows[left.index] != dense.rows[right.index])
             }
         }
+        // All song lines participate, retaining word addresses even across untimed words.
+        let song = SongWordTimeline(lines: [
+            [TimedWord(text: "first", start: 1, end: 3), TimedWord(text: "untimed")],
+            [TimedWord(text: "overlap", start: 2, end: 4), TimedWord(text: "later", start: 80, end: 81)]
+        ], pointsPerSecond: 260)
+        precondition(song.entries.map(\.id) == [0, 2, 3])
+        precondition(song.entries.map(\.line) == [0, 1, 1])
+        precondition(song.entries.map(\.word) == [0, 0, 1])
+        precondition(song.tracks.rows == [0: 0, 2: 1, 3: 1])
+        precondition(song.entries.last?.end == 81)
+        precondition(SongWordTimeline(lines: [[], [TimedWord(text: "untimed")]], pointsPerSecond: 60).entries.isEmpty)
+
         let legacy = Data(#"{"text":"York","space":false,"start":0.6,"end":1.6}"#.utf8)
         var saved = try JSONDecoder().decode(TimedWord.self, from: legacy)
         precondition(saved.timingTrack == nil)

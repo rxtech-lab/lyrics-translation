@@ -9,7 +9,7 @@ struct LyricVideoSheet: View {
     @Binding var song: Song
     let title: String
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("lyricVideoFPS") private var exportFPS = 60
+    @AppStorage("lyricVideoFPS") private var exportFPS = 30
     @AppStorage("lyricVideoResolution") private var exportResolution = VideoResolution.fullHD.rawValue
     @AppStorage("lyricVideoRenderWorkers") private var exportWorkers = 0
     @State private var lyricMode: VideoLyricMode = .original
@@ -33,10 +33,12 @@ struct LyricVideoSheet: View {
     @State private var syncTask: Task<Void, Never>?
     @State private var importing = false
     @State private var revising = false
+    @State private var stylingKaraoke = false
     @State private var exporting = false
     @State private var publishingVideo: URL?
     @State private var publishingVideoHasAudio = false
     @State private var busy = false
+    @State private var cancelling = false
     @State private var status = ""
     @State private var detail = ""
     @State private var error: String?
@@ -95,6 +97,17 @@ struct LyricVideoSheet: View {
         } })) {
             ShareLyricsSheet(song: $song, title: title, initialVideoURL: publishingVideo, initialVideoHasAudio: publishingVideoHasAudio)
         }
+        .sheet(isPresented: $stylingKaraoke) {
+            let current = script.flatMap(KaraokeVideoStyle.from)
+            KaraokeVideoStyleSheet(style: current ?? .load(), editing: current != nil, silent: audioFile == nil,
+                                   makePreview: { try await karaokePreview($0, engine: $1) }) { buildKaraoke($0) }
+        }
+        .onChange(of: stylingKaraoke) { _, open in
+            // The karaoke sheet plays its own preview; stop this one so they don't play over each other.
+            guard open else { return }
+            if appleMusicPreview { MusicPlayback.shared.pause() }
+            Task { try? await session?.pause() }
+        }
         .sheet(isPresented: $revising) {
             ReviseVideoSheet(style: script?.style ?? "", setting: director.wrappedValue) { notes, setting in
                 director.wrappedValue = setting
@@ -115,10 +128,12 @@ struct LyricVideoSheet: View {
             Button("Delete", role: .destructive) { song.videoHistory.removeAll { $0.id == item.id }; pendingDelete = nil }
         } message: { item in Text(item.style) }
         .onAppear {
+            LocalCacheActivity.shared.videoUsers += 1
             useAppleMusic = hasAppleMusic
             if let saved = song.videoHistory.first, let saved = VideoLyricMode(rawValue: saved.track) { lyricMode = saved }
         }
         .onDisappear {
+            LocalCacheActivity.shared.videoUsers = max(0, LocalCacheActivity.shared.videoUsers - 1)
             syncTask?.cancel(); task?.cancel(); pipeline.stop()
             if appleMusicPreview { MusicPlayback.shared.pause() }
             session?.dispose(); engine.closeAll()
@@ -134,10 +149,14 @@ struct LyricVideoSheet: View {
                 Spacer(minLength: 16)
                 if session != nil {
                     Menu {
-                        Button("New Style", systemImage: "dice") { direct(.fresh(avoid: script?.style)) }
+                        Button(theme == .karaoke ? "Karaoke Style…" : "New Style", systemImage: theme == .karaoke ? "textformat.size" : "dice") { directFresh(avoid: script?.style) }
                         Divider()
                         Button("Director Settings…", systemImage: "slider.horizontal.3") { closePreview() }
                     } label: { Label("Director", systemImage: "wand.and.stars") }
+                }
+                if project != nil, let script, KaraokeVideoStyle.from(script) != nil {
+                    Button("Karaoke Style…", systemImage: "textformat.size") { stylingKaraoke = true }
+                        .help("Change the background, colors, font sizes and layout of this karaoke video")
                 }
                 if project != nil {
                     Button("Refine…", systemImage: "pencil.and.scribble") { revising = true }
@@ -187,7 +206,13 @@ struct LyricVideoSheet: View {
                 Text("Last check: \(lastFailure)").font(.caption).foregroundStyle(.orange)
                     .lineLimit(3).multilineTextAlignment(.center).frame(maxWidth: 380)
             }
-            Button("Cancel") { task?.cancel(); pipeline.stop() }
+            Button(cancelling ? "Cancelling…" : "Cancel") {
+                cancelling = true
+                status = "Cancelling…"
+                task?.cancel()
+                pipeline.stop()
+            }
+            .disabled(cancelling)
         }
         .frame(minWidth: 260)
         .padding(28).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -297,6 +322,7 @@ struct LyricVideoSheet: View {
                             Text("Open a saved video to preview it, then choose Refine Video… to describe changes to the director.")
                         }
                     }
+                    if theme != .karaoke {
                     Section("Artwork") {
                         LabeledContent("Image provider") {
                             Button("\(artworkConfiguration.provider.rawValue) · Configure…") { configuringArtwork = true }
@@ -312,6 +338,7 @@ struct LyricVideoSheet: View {
                     } header: { Text("Direction") } footer: {
                         Text("Leave empty to let the director choose. Each video gets a different style.")
                     }
+                    }
                 }
                 .formStyle(.grouped)
                 Divider()
@@ -322,7 +349,7 @@ struct LyricVideoSheet: View {
                     .menuStyle(.borderlessButton).fixedSize()
                     .disabled(!audioReady)
                     Spacer()
-                    Button("Direct Video", systemImage: "wand.and.stars") { direct(.fresh(avoid: song.videoHistory.first?.style)) }
+                    Button("Direct Video", systemImage: "wand.and.stars") { directFresh(avoid: song.videoHistory.first?.style) }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
                         .disabled(!audioReady)
@@ -461,6 +488,44 @@ struct LyricVideoSheet: View {
         }
     }
 
+    /// The Karaoke theme is configured in its own sheet and built by the app; other themes go to the director.
+    private func directFresh(avoid: String?) {
+        if theme == .karaoke { stylingKaraoke = true } else { direct(.fresh(avoid: avoid)) }
+    }
+
+    /// Creates a karaoke video, or restyles the open one in place so Saved Videos keeps a single entry for it.
+    private func buildKaraoke(_ style: KaraokeVideoStyle) {
+        let current = script.flatMap { KaraokeVideoStyle.from($0) != nil ? $0 : nil }
+        run(status: "Preparing karaoke video…") {
+            let data = try await loadSong()
+            var candidate = current ?? LyricVideoScript(track: lyricMode.rawValue, files: [:], style: "", agent: KaraokeVideoStyle.agentName)
+            candidate.files = try style.files()
+            candidate.style = style.styleLabel
+            try await present(candidate, data: data)
+            if let index = song.videoHistory.firstIndex(where: { $0.id == candidate.id }) {
+                song.videoHistory[index] = candidate
+            } else {
+                song.videoHistory.insert(candidate, at: 0)
+            }
+        }
+    }
+
+    /// Renders the song with karaoke settings in its own folder, for the karaoke sheet's live preview.
+    private func karaokePreview(_ style: KaraokeVideoStyle, engine: RemotionEngine) async throws -> KaraokePreviewBuild {
+        let data = try await loadSong()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("KaraokePreview-" + UUID().uuidString)
+        do {
+            try writeProject(files: try style.files(), data: data, to: folder)
+            let prepared = try await engine.prepare(projectURL: folder, entryPoint: "src/index.tsx")
+            let session = try await engine.makePreviewSession(project: prepared)
+            return KaraokePreviewBuild(session: session, folder: folder, start: max(0, data.firstLyric - 1))
+        } catch {
+            engine.close(projectURL: folder)
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+    }
+
     /// Runs the director in a project folder where it creates and edits files with tools, checks its own work,
     /// and gets up to two more turns to fix anything the final check still finds.
     private func direct(_ request: Request) {
@@ -567,12 +632,17 @@ struct LyricVideoSheet: View {
 
     private func run(status: String, _ work: @escaping @MainActor () async throws -> Void) {
         task?.cancel()
-        busy = true; self.status = status; detail = ""
+        busy = true; cancelling = false; self.status = status; detail = ""
         task = Task { @MainActor in
-            defer { busy = false; detail = "" }
-            do { try await work(); finished += 1 }
+            LocalCacheActivity.shared.videoUsers += 1
+            defer {
+                LocalCacheActivity.shared.videoUsers = max(0, LocalCacheActivity.shared.videoUsers - 1)
+                busy = false; cancelling = false; detail = ""; task = nil
+            }
+            do { try await work(); try Task.checkCancellation(); finished += 1 }
             catch is CancellationError {}
             catch {
+                guard !Task.isCancelled else { return }
                 if (error as? PipelineError) != nil { directorFailed = true }
                 self.error = error.localizedDescription
             }
@@ -628,6 +698,7 @@ struct LyricVideoSheet: View {
                 words.append(["text": word.text + (word.space ? " " : ""), "start": Self.round(start), "end": Self.round(end)])
             }
             lines.append(["index": lines.count, "start": Self.round(lineStart), "end": Self.round(lineEnd),
+                          "track": lineTrack == .original ? "original" : "translation",
                           "text": line.text(lineTrack), "subtitle": lyricMode == .both ? line.text(lineTrack.other) : "",
                           "speaker": line.speaker.map { $0 as Any } ?? NSNull(), "section": line.section.map { $0 as Any } ?? NSNull(), "words": words])
         }
@@ -755,19 +826,30 @@ struct LyricVideoSheet: View {
                 if forPublishing && publishingVideo != url { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
             }
             if appleMusicPreview { MusicPlayback.shared.pause() }
+            // Stop the 20 Hz Apple Music seek loop while export owns the renderer.
+            syncTask?.cancel()
+            syncTask = nil
+            defer {
+                if appleMusicPreview, let session, let duration = session.composition?.duration {
+                    follow(session, duration: duration)
+                }
+            }
             try await session?.pause()
+            try Task.checkCancellation()
             let data = try await loadSong(fps: fps)
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent("LyricVideoExport-" + UUID().uuidString)
             defer { engine.close(projectURL: folder); try? FileManager.default.removeItem(at: folder) }
             try writeProject(files: try Self.projectFiles(script), assets: script.assets ?? [:], data: data, to: folder)
             let prepared = try await engine.prepare(projectURL: folder, entryPoint: "src/index.tsx")
             let settings = RemotionRenderSettings(width: resolution.width, height: resolution.height, fps: Double(fps),
-                                                  concurrency: workerCount)
+                                                  concurrency: workerCount, frameIndependent: true)
             try await engine.renderMovie(project: prepared, to: url, settings: settings) { progress in
+                guard !cancelling else { return }
                 status = "\(progress.stage.rawValue.capitalized) \(resolution.label) · \(fps) fps"
                 let percentage = progress.fraction.map { "\(Int($0 * 100))% · " } ?? ""
                 detail = percentage + "\(workerCount) render \(workerCount == 1 ? "worker" : "workers")"
             }
+            try Task.checkCancellation()
             if forPublishing {
                 publishingVideoHasAudio = !appleMusicPreview
                 publishingVideo = url
@@ -860,7 +942,7 @@ struct LyricVideoSheet: View {
 
         DATA CONTRACT — the file must `import song from './song.json';` which has this shape:
         type Word = { text: string; start: number; end: number }  // seconds; text already includes its trailing space when one follows
-        type Line = { index: number; start: number; end: number; text: string; subtitle: string; speaker: string | null; section: string | null; words: Word[] }
+        type Line = { index: number; start: number; end: number; track: 'original' | 'translation'; text: string; subtitle: string; speaker: string | null; section: string | null; words: Word[] }
         type Song = { title: string; language: string; fps: number; frames: number; duration: number; width: 1920; height: 1080; audio: string; lines: Line[] }
         Render subtitle only when non-empty, as plain text without word highlighting. In bilingual mode, each line can use timed translation with original subtitle, or timed original with translation subtitle when translation timing is absent. Never invent or add a translation when subtitle is empty.
         Lines are sorted by start and may overlap when singers overlap; gaps between lines can be long instrumentals. Words with start === end are untimed and appear with their line.
@@ -998,7 +1080,7 @@ struct LyricVideoSheet: View {
 }
 
 /// Scrubbable position slider with elapsed and total time; seeks live while dragging.
-private struct VideoTimeline: View {
+struct VideoTimeline: View {
     let session: RemotionPreviewSession
     let seek: (Int) -> Void
     @State private var scrubbing: Double?
@@ -1062,11 +1144,11 @@ private struct ExportVideoSheet: View {
                     }
                     Picker("Frame rate", selection: $fps) {
                         Text("24 fps · Cinematic").tag(24)
-                        Text("30 fps").tag(30)
+                        Text("30 fps · Recommended").tag(30)
                         Text("60 fps · Smoothest").tag(60)
                     }
                 } footer: {
-                    Text("The video is redrawn at full resolution, so text stays sharp at 4K. Higher resolutions and frame rates take longer to export.")
+                    Text("30 fps renders half as many frames as 60 fps. Choose 720p for a faster draft or 1080p at 30 fps for sharing. Higher resolutions and frame rates take longer.")
                 }
                 Section {
                     Picker("Render workers", selection: $workers) {
@@ -1160,6 +1242,7 @@ private enum LyricVideoTheme: String, CaseIterable, Identifiable {
     case hyperpop = "Hyperpop Zoom"
     case kinetic = "Kinetic Type"
     case cinematic = "Cinematic"
+    case karaoke = "Karaoke"
     var id: String { rawValue }
     var summary: String {
         switch self {
@@ -1168,6 +1251,7 @@ private enum LyricVideoTheme: String, CaseIterable, Identifiable {
         case .hyperpop: "Saturated colors, bold words and energetic zooms for fast music."
         case .kinetic: "Expressive typography that moves with each phrase."
         case .cinematic: "Atmospheric depth, soft light and flowing camera movement."
+        case .karaoke: "Word-by-word color wipe on a solid, gradient or green-screen background. Built instantly, no agent."
         }
     }
     var instructions: String {
@@ -1182,6 +1266,8 @@ private enum LyricVideoTheme: String, CaseIterable, Identifiable {
             "Make expressive typography the visual centerpiece: word-by-word reveals, strong scale contrast, flowing multi-row compositions and deliberate rotations. Match motion and palette to lyrical meaning. Keep illustrations restrained and preserve reading time."
         case .cinematic:
             "Use lyric-inspired landscapes and symbols, layered atmosphere, restrained palettes, soft light and film-like grain. Favor slow continuous camera travel and meaningful section transitions over frantic effects. Typography remains prominent and legible."
+        case .karaoke:
+            "Classic karaoke: lyrics on a calm, fixed background with each word filling with color exactly as it is sung. Keep the camera still and the text large and readable."
         }
     }
 }
@@ -1210,7 +1296,7 @@ private struct LyricVideoThemeSheet: View {
                 .buttonStyle(.plain)
             }
             .safeAreaInset(edge: .bottom) {
-                Text("Anime Layers uses your configured image provider for scenery and transparent character layers. Scenes change with the lyrics; generated artwork is saved for preview and export. Choose Codex or an API provider in Artwork Settings.")
+                Text("Anime Layers uses your configured image provider for scenery and transparent character layers. Scenes change with the lyrics; generated artwork is saved for preview and export. Choose Codex or an API provider in Artwork Settings. Karaoke is built by the app without the director; choose its background, colors and font sizes after pressing Direct Video.")
                     .font(.caption).foregroundStyle(.secondary).padding()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
