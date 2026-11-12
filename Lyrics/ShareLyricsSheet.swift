@@ -22,7 +22,8 @@ struct ShareLyricsSheet: View {
     @State private var status: String?
     @State private var sharedURL: URL?
     @State private var copied = false
-    private struct PublishedVideo: Codable { let key: String; let hasAudio: Bool }
+    private struct StreamingVideo: Codable { let id: String; let files: [String] }
+    private struct PublishedVideo: Codable { let key: String; let hasAudio: Bool; var streaming: StreamingVideo? = nil }
     @State private var publishedVideo: PublishedVideo?
     @State private var videoFile: URL?
     @State private var includeVideo = true
@@ -112,7 +113,7 @@ struct ShareLyricsSheet: View {
                         if videoFile != nil { Toggle("Video Contains Audio", isOn: $videoHasAudio).disabled(busy) }
                     }
                 } header: { Text("Lyric Video") } footer: {
-                    Text("Export an MP4 from Lyric Video, then include it here. Silent videos play with Apple Music in fullscreen. Only share audio you have permission to publish.")
+                    Text("Publishing prepares adaptive streaming video locally with FFmpeg hardware acceleration and uploads it alongside your original MP4. Export an MP4 from Lyric Video, then include it here. Silent videos play with Apple Music in fullscreen. Only share audio you have permission to publish.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section {
@@ -415,15 +416,40 @@ struct ShareLyricsSheet: View {
         defer { if scoped { file.stopAccessingSecurityScopedResource() } }
         let values = try file.resourceValues(forKeys: [.fileSizeKey])
         guard let size = values.fileSize, size > 0, size <= 2_147_483_648 else { throw ShareError.videoSize }
+        let package = try await VideoStreaming.prepare(file, hasAudio: videoHasAudio) { activity = $0 }
+        defer { try? FileManager.default.removeItem(at: package.directory) }
+        let streamID = UUID().uuidString.lowercased()
+        let files: [(URL, String?)] = [(file, nil)] + package.files.map { (package.directory.appendingPathComponent($0), $0) }
+        let sizes = try files.map { try $0.0.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 }
+        guard sizes.allSatisfy({ $0 > 0 && $0 <= 2_147_483_648 }) else { throw ShareError.videoSize }
         uploadedBytes = 0
-        uploadTotal = Int64(size)
+        uploadTotal = sizes.reduce(0) { $0 + Int64($1) }
         defer { uploadTotal = nil; uploadedBytes = 0 }
+        var originalKey = ""
+        var completed: Int64 = 0
+        for (index, item) in files.enumerated() {
+            activity = "Uploading \(item.1 ?? "original MP4") (\(index + 1) of \(files.count))…"
+            let key = try await uploadVideoFile(item.0, size: sizes[index], filename: item.1,
+                                                streamID: streamID, token: token, completed: completed)
+            if item.1 == nil { originalKey = key }
+            completed += Int64(sizes[index])
+            uploadedBytes = completed
+        }
+        return PublishedVideo(key: originalKey, hasAudio: videoHasAudio,
+                              streaming: StreamingVideo(id: streamID, files: package.files))
+    }
+
+    private func uploadVideoFile(_ file: URL, size: Int, filename: String?, streamID: String,
+                                 token: String, completed: Int64) async throws -> String {
         guard let endpoint = URL(string: server + "/api/shares/video-upload"), let id = song.publicationID else { throw ShareError.configuration }
+        let contentType = filename == nil ? "video/mp4" : filename!.hasSuffix(".m3u8") ? "application/vnd.apple.mpegurl" : "video/mp2t"
+        var body: [String: Any] = ["documentId": id.uuidString, "size": size]
+        if let filename { body["streamID"] = streamID; body["filename"] = filename }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["documentId": id.uuidString, "size": size])
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ShareError.failed }
         struct Upload: Decodable { let uploadURL: URL; let key: String }
@@ -432,14 +458,14 @@ struct ShareLyricsSheet: View {
         var put = URLRequest(url: upload.uploadURL)
         put.httpMethod = "PUT"
         put.timeoutInterval = 3600
-        put.setValue("video/mp4", forHTTPHeaderField: "Content-Type")
+        put.setValue(contentType, forHTTPHeaderField: "Content-Type")
         put.setValue(String(size), forHTTPHeaderField: "Content-Length")
         let progress = VideoUploadProgress { sent in
-            uploadedBytes = max(uploadedBytes, min(sent, Int64(size)))
+            uploadedBytes = max(uploadedBytes, completed + min(sent, Int64(size)))
         }
         let (_, result) = try await URLSession.shared.upload(for: put, fromFile: file, delegate: progress)
         guard let code = (result as? HTTPURLResponse)?.statusCode, (200 ..< 300).contains(code) else { throw ShareError.failed }
-        return PublishedVideo(key: upload.key, hasAudio: videoHasAudio)
+        return upload.key
     }
 
     enum ShareError: LocalizedError {

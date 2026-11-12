@@ -3,7 +3,7 @@ import {identity,sameOrigin,authenticatedProfile} from '@/lib/auth';
 import {db,init} from '@/lib/db';
 import {documentSchema} from '@/lib/document';
 import {z} from 'zod';
-import {validateVideo} from '@/lib/video-storage';
+import {validateVideo, validateStreaming} from '@/lib/video-storage';
 
 const publicationKey = (owner: string, id: string) => createHash('sha256').update(JSON.stringify([owner,id])).digest('hex');
 const documentID = z.string().uuid();
@@ -47,6 +47,7 @@ export async function POST(r:Request) {
     if (data.document.lyricVideo) {
       if (!data.documentId) return new Response('Video requires a document ID', {status:400});
       await validateVideo(owner, data.documentId, data.document.lyricVideo.key);
+      if (data.document.lyricVideo.streaming) await validateStreaming(owner, data.documentId, data.document.lyricVideo.streaming);
     }
     await init();
     const id=data.documentId ? publicationKey(owner,data.documentId) : crypto.randomUUID();

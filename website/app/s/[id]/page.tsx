@@ -1,4 +1,4 @@
-import {videoURL} from '@/lib/video-storage';
+import {videoURL, streamingURL} from '@/lib/video-storage';
 import ShareLines from './share-lines';
 import AnalyzedLyrics from './analyzed-lyrics';
 import Link from 'next/link';import {identity} from '@/lib/auth';import {db,get} from '@/lib/db';import {notFound} from 'next/navigation';import {tokens,Document} from '@/lib/document';import Player from './player';import {songAlbumHref,songArtistHref,songHref} from '@/lib/links';export const dynamic='force-dynamic';
@@ -24,7 +24,7 @@ export default async function Shared({params,searchParams}:{params:Promise<{id:s
       </dl>
       <a href={d.appleMusic.url || `https://music.apple.com/song/${d.appleMusic.id}`} target="_blank" rel="noopener noreferrer">Listen on Apple Music ↗</a>
     </section>}
-    <Player video={d.lyricVideo ? {url: videoURL(d.lyricVideo.key), hasAudio: d.lyricVideo.hasAudio} : undefined} initialStarred={starred} initialStars={Number(r.stars)} tokenCount={tokens(d)} usageSummary={d.usageSummary} lines={d.lines} id={id} song={d.appleMusic?.id} title={d.appleMusic?.title} artist={d.appleMusic?.artist} artworkURL={d.appleMusic?.artworkURL}><ShareLines lines={d.lines} target={d.target} title={d.appleMusic?.title || String(r.title)}/></Player>
+    <Player video={d.lyricVideo ? {url: videoURL(d.lyricVideo.key), hasAudio: d.lyricVideo.hasAudio, streamingURL: d.lyricVideo.streaming ? streamingURL(d.lyricVideo.key, d.lyricVideo.streaming.id) : undefined} : undefined} initialStarred={starred} initialStars={Number(r.stars)} tokenCount={tokens(d)} usageSummary={d.usageSummary} lines={d.lines} id={id} song={d.appleMusic?.id} title={d.appleMusic?.title} artist={d.appleMusic?.artist} artworkURL={d.appleMusic?.artworkURL}><ShareLines lines={d.lines} target={d.target} title={d.appleMusic?.title || String(r.title)}/></Player>
     <section className="translation-reading" aria-label="Lyrics and translation">
       <div className="translation-columns"><span>LYRICS · {d.target.toUpperCase()} TRANSLATION</span></div>
       <AnalyzedLyrics lines={d.lines} highlighted={[...highlighted]}/>

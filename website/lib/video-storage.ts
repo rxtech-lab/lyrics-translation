@@ -1,3 +1,5 @@
+import {streamingSchema, streamFileSchema} from './document';
+import {z} from 'zod';
 import {createHash, randomUUID} from 'node:crypto';
 import {HeadObjectCommand, PutObjectCommand, S3Client} from '@aws-sdk/client-s3';
 import {getSignedUrl} from '@aws-sdk/s3-request-presigner';
@@ -25,12 +27,23 @@ export function videoURL(key: string) {
   url.pathname = `${prefix}/${key}`;
   return url.href;
 }
-export async function createVideoUpload(owner: string, documentId: string, size: number) {
+export function streamContentType(filename: string) {
+  streamFileSchema.parse(filename);
+  return filename.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t';
+}
+export function streamKey(owner: string, documentId: string, streamID: string, filename: string) {
+  z.string().uuid().parse(streamID);
+  streamFileSchema.parse(filename);
+  return `${videoPrefix(owner, documentId)}${streamID}/${filename}`;
+}
+export async function createVideoUpload(owner: string, documentId: string, size: number, stream?: {id: string; filename: string}) {
   const {bucket, client} = storage();
-  const key = `${videoPrefix(owner, documentId)}${randomUUID()}.mp4`;
+  if (!Number.isSafeInteger(size) || size <= 0 || size > maxVideoBytes) throw Error('Invalid size');
+  const key = stream ? streamKey(owner, documentId, stream.id, stream.filename) : `${videoPrefix(owner, documentId)}${randomUUID()}.mp4`;
+  const contentType = stream ? streamContentType(stream.filename) : 'video/mp4';
   videoURL(key);
   const uploadURL = await getSignedUrl(client, new PutObjectCommand({Bucket: bucket, Key: key,
-    ContentType: 'video/mp4', ContentLength: size}), {expiresIn: 900, signableHeaders: new Set(['content-type', 'content-length'])});
+    ContentType: contentType, ContentLength: size}), {expiresIn: 900, signableHeaders: new Set(['content-type', 'content-length'])});
   return {uploadURL, key};
 }
 export async function validateVideo(owner: string, documentId: string, key: string) {
@@ -38,4 +51,18 @@ export async function validateVideo(owner: string, documentId: string, key: stri
   const {bucket, client} = storage();
   const object = await client.send(new HeadObjectCommand({Bucket: bucket, Key: key}));
   if (object.ContentType !== 'video/mp4' || !object.ContentLength || object.ContentLength > maxVideoBytes) throw Error('Invalid video');
+}
+
+export async function validateStreaming(owner: string, documentId: string, stream: z.infer<typeof streamingSchema>) {
+  const parsed = streamingSchema.parse(stream);
+  const {bucket, client} = storage();
+  await Promise.all(parsed.files.map(async filename => {
+    const key = streamKey(owner, documentId, parsed.id, filename);
+    const object = await client.send(new HeadObjectCommand({Bucket: bucket, Key: key}));
+    if (object.ContentType !== streamContentType(filename) || !object.ContentLength || object.ContentLength > maxVideoBytes) throw Error('Invalid streaming asset');
+  }));
+}
+export function streamingURL(originalKey: string, streamID: string) {
+  z.string().uuid().parse(streamID);
+  return videoURL(`${originalKey.slice(0, originalKey.lastIndexOf('/') + 1)}${streamID}/master.m3u8`);
 }

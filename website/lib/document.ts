@@ -8,7 +8,14 @@ export const usageSummarySchema = z.array(z.object({
   tokens: z.number().int().nonnegative(),
   costUSD: z.number().finite().nonnegative().nullable(),
 })).max(1000);
-export const lyricVideoSchema = z.object({key: z.string().regex(/^lyric-videos\/[a-f0-9]{64}\/[a-f0-9-]{36}\.mp4$/), hasAudio: z.boolean()});
+export const streamFileSchema = z.string().regex(/^(master\.m3u8|[1-9][0-9]{0,3}\.(m3u8|ts))$/);
+export const streamingSchema = z.object({id: z.string().uuid(), files: z.array(streamFileSchema).min(3).max(7)}).superRefine((value, ctx) => {
+  const files = new Set(value.files);
+  if (files.size !== value.files.length || !files.has('master.m3u8') || value.files.some(f => f !== 'master.m3u8' && !files.has(f.replace(/\.(ts|m3u8)$/, f.endsWith('.ts') ? '.m3u8' : '.ts')))) {
+    ctx.addIssue({code: 'custom', message: 'Incomplete streaming package'});
+  }
+});
+export const lyricVideoSchema = z.object({key: z.string().regex(/^lyric-videos\/[a-f0-9]{64}\/[a-f0-9-]{36}\.mp4$/), hasAudio: z.boolean(), streaming: streamingSchema.optional()});
 export const documentSchema = legacyDocumentSchema.extend({usageSummary: usageSummarySchema.optional(), lyricVideo: lyricVideoSchema.optional()}).transform(({usageLog, usageSummary, ...document}) => {
   const agents = new Map<string, {agent: string; tokens: number; costUSD: number | null}>();
   for (const record of (usageLog ?? []).flatMap(session => session.records)) {

@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {documentSchema} from './document';
-import {createVideoUpload, validateVideo, videoPrefix, videoURL} from './video-storage';
+import {createVideoUpload, validateVideo, videoPrefix, videoURL, streamKey, streamContentType, streamingURL} from './video-storage';
 
 const documentId = '9c630ee3-5ce0-4dfa-88c6-148fe464302e';
 const key = `${videoPrefix('alice', documentId)}9c630ee3-5ce0-4dfa-88c6-148fe464302e.mp4`;
@@ -50,6 +50,37 @@ test('presigned upload binds media type and size and resolves media URL', async 
     assert.equal(videoURL(key), `https://lyricss3.rxlab.app/lyrics-studio/${key}`);
     process.env.S3_VIDEO_PUBLIC_URL = 'http://media.example.com';
     assert.throws(() => videoURL(upload.key), /HTTPS/);
+  } finally {
+    for (const name of Object.keys(process.env)) if (!(name in prior)) delete process.env[name];
+    Object.assign(process.env, prior);
+  }
+});
+
+const streamID = '1c630ee3-5ce0-4dfa-88c6-148fe464302e';
+test('streaming metadata requires paired rendition files and a master playlist', () => {
+  const streaming = {id: streamID, files: ['360.ts', '360.m3u8', 'master.m3u8']};
+  assert.deepEqual(documentSchema.parse({...legacy, lyricVideo: {key, hasAudio: true, streaming}}).lyricVideo?.streaming, streaming);
+  for (const files of [['360.ts', '360.m3u8'], ['360.ts', 'master.m3u8', 'master.m3u8'], ['../360.ts', '360.m3u8', 'master.m3u8'], ['360.ts', '720.m3u8', 'master.m3u8']]) {
+    assert.equal(documentSchema.safeParse({...legacy, lyricVideo: {key, hasAudio: false, streaming: {...streaming, files}}}).success, false);
+  }
+  assert.throws(() => streamKey('alice', documentId, streamID, '../master.m3u8'));
+  assert.throws(() => streamKey('alice', documentId, '../other', 'master.m3u8'));
+  assert.notEqual(streamKey('alice', documentId, streamID, 'master.m3u8'), streamKey('bob', documentId, streamID, 'master.m3u8'));
+});
+test('HLS presigning binds content type and preserves relative package paths', async () => {
+  const prior = {...process.env};
+  try {
+    Object.assign(process.env, {S3_VIDEO_BUCKET: 'test', S3_VIDEO_PUBLIC_URL: 'https://media.example.com', AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test'});
+    delete process.env.S3_ENDPOINT;
+    for (const filename of ['master.m3u8', '360.m3u8', '360.ts']) {
+      const upload = await createVideoUpload('alice', documentId, 100, {id: streamID, filename});
+      assert.equal(upload.key, streamKey('alice', documentId, streamID, filename));
+      assert.match(new URL(upload.uploadURL).searchParams.get('X-Amz-SignedHeaders')!, /content-type/);
+      assert.equal(new URL(filename, streamingURL(key, streamID)).href, videoURL(upload.key));
+    }
+    assert.equal(streamContentType('360.ts'), 'video/mp2t');
+    assert.equal(streamContentType('master.m3u8'), 'application/vnd.apple.mpegurl');
+    await assert.rejects(createVideoUpload('alice', documentId, 0));
   } finally {
     for (const name of Object.keys(process.env)) if (!(name in prior)) delete process.env[name];
     Object.assign(process.env, prior);

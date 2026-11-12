@@ -37,6 +37,7 @@
 		9F40E2FD316116000B92767E /* OriginalLyricsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA6052EA2FAA44CEB23C2801 /* OriginalLyricsSheet.swift */; };
 		AAD8DD77D05D1932C666E734 /* RxRemotion in Frameworks */ = {isa = PBXBuildFile; productRef = C6343E09BC494AD52431802F /* RxRemotion */; };
 		AB02F319A10D30F3F881239C /* PreviewSong.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD429D8797E7AA3D1D58321 /* PreviewSong.swift */; };
+		ABB399659EC4E8834EE82B37 /* VideoStreaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1541E111FD049B36BAB7EA98 /* VideoStreaming.swift */; };
 		AF70D523BD619EE6772941F7 /* VideoUploadProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF77473FAF7A660A0FA291D /* VideoUploadProgress.swift */; };
 		B17C33B070D6112B945FB1B6 /* VideoWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47CD25FE45F6B79F60ACB127 /* VideoWorkspace.swift */; };
 		B1E72B7318602565F58A9F70 /* AgentModelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BDDEB133AA863719362729D /* AgentModelPicker.swift */; };
@@ -94,6 +95,7 @@
 		05CB0701BA4A6D9E8B4E7C30 /* LocalCacheFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCacheFiles.swift; sourceTree = "<group>"; };
 		079AB2FDB3F1309C5E9485D7 /* RxAgentSDK */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RxAgentSDK; path = ../rxlab/RxAgentSDK; sourceTree = SOURCE_ROOT; };
 		0B2422DE5825B7519231B63A /* PreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewViewController.swift; sourceTree = "<group>"; };
+		1541E111FD049B36BAB7EA98 /* VideoStreaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoStreaming.swift; sourceTree = "<group>"; };
 		219CD9B1B06537457D4B6188 /* WordTimingEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordTimingEditor.swift; sourceTree = "<group>"; };
 		23A4C11A2D8351D405CC7893 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2B2D4D546A525ECC0798A2A6 /* AutoTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTiming.swift; sourceTree = "<group>"; };
@@ -196,6 +198,7 @@
 				A30D3031AE88B40531CE5997 /* TranslationTeamSheet.swift */,
 				40E3E99C6F9325D6DE4A7CFA /* UsageSheet.swift */,
 				E36CB4D5BF787C88F4F61929 /* VideoRenderWorkers.swift */,
+				1541E111FD049B36BAB7EA98 /* VideoStreaming.swift */,
 				CAF77473FAF7A660A0FA291D /* VideoUploadProgress.swift */,
 				47CD25FE45F6B79F60ACB127 /* VideoWorkspace.swift */,
 				630D685B788D3808B3E63081 /* WaveformRecorder.swift */,
@@ -446,6 +449,7 @@
 				647E450786795175F23C0BB4 /* TranslationTeamSheet.swift in Sources */,
 				32FB6C7179AAB5D1A6FCA072 /* UsageSheet.swift in Sources */,
 				F26A45044EA17FCEA386819A /* VideoRenderWorkers.swift in Sources */,
+				ABB399659EC4E8834EE82B37 /* VideoStreaming.swift in Sources */,
 				AF70D523BD619EE6772941F7 /* VideoUploadProgress.swift in Sources */,
 				B17C33B070D6112B945FB1B6 /* VideoWorkspace.swift in Sources */,
 				89D1AD934BE137A98C97C062 /* WaveformRecorder.swift in Sources */,
