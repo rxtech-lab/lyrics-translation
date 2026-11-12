@@ -842,7 +842,7 @@ struct LyricVideoSheet: View {
             try writeProject(files: try Self.projectFiles(script), assets: script.assets ?? [:], data: data, to: folder)
             let prepared = try await engine.prepare(projectURL: folder, entryPoint: "src/index.tsx")
             let settings = RemotionRenderSettings(width: resolution.width, height: resolution.height, fps: Double(fps),
-                                                  concurrency: workerCount, frameIndependent: true)
+                                                  concurrency: workerCount)
             try await engine.renderMovie(project: prepared, to: url, settings: settings) { progress in
                 guard !cancelling else { return }
                 status = "\(progress.stage.rawValue.capitalized) \(resolution.label) · \(fps) fps"
