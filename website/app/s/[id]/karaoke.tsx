@@ -1,4 +1,5 @@
 "use client";
+import Hls from 'hls.js';
 import PlayerIcon from './player-icon';
 import {focusLine} from './karaoke-focus';
 import {memo, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
@@ -19,7 +20,7 @@ export function resolve(words: Word[]) {
   });
 }
 export default function Karaoke({open, onClose, lines, getTime, onSeek, title, artist, children, video, playing, pauseMusic, hasMusic, startWithVideo}: {
-  startWithVideo?: boolean; hasMusic?: boolean; video?: {url: string; hasAudio: boolean}; playing?: boolean; pauseMusic: () => void; open: boolean; onClose: () => void; lines: Document['lines']; getTime: () => number; onSeek: (time: number) => void; title?: string; artist?: string; children: ReactNode;
+  startWithVideo?: boolean; hasMusic?: boolean; video?: {url: string; hasAudio: boolean; streamingURL?: string}; playing?: boolean; pauseMusic: () => void; open: boolean; onClose: () => void; lines: Document['lines']; getTime: () => number; onSeek: (time: number) => void; title?: string; artist?: string; children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -29,9 +30,36 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
   useEffect(() => { if (open) setVideoMode(!!startWithVideo); }, [open, startWithVideo]);
   const [videoError, setVideoError] = useState(false);
   const videoElement = useRef<HTMLVideoElement>(null);
+  // Attach after the fullscreen portal has mounted; preserve the existing music-clock sync.
   useEffect(() => {
     const element = videoElement.current;
-    if (!open || !videoMode || !element) return;
+    if (!present || !videoMode || !element || !video) return;
+    setVideoError(false);
+    let hls: Hls | undefined;
+    const fallback = () => {
+      hls?.destroy(); hls = undefined;
+      element.src = video.url;
+      element.load();
+    };
+    if (video.streamingURL && element.canPlayType('application/vnd.apple.mpegurl')) {
+      element.src = video.streamingURL;
+      element.addEventListener('error', fallback, {once: true});
+    } else if (video.streamingURL && Hls.isSupported()) {
+      hls = new Hls();
+      hls.loadSource(video.streamingURL);
+      hls.attachMedia(element);
+      hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) fallback(); });
+    } else element.src = video.url;
+    return () => {
+      element.removeEventListener('error', fallback);
+      hls?.destroy();
+      element.removeAttribute('src');
+      element.load();
+    };
+  }, [present, videoMode, video]);
+  useEffect(() => {
+    const element = videoElement.current;
+    if (!open || !present || !videoMode || !element) return;
     if (video?.hasAudio || !hasMusic) { pauseMusic(); return () => element.pause(); }
     let frame = 0;
     const sync = () => {
@@ -43,7 +71,7 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
     };
     frame = requestAnimationFrame(sync);
     return () => { cancelAnimationFrame(frame); element.pause(); };
-  }, [open, videoMode, video, playing, getTime, pauseMusic, hasMusic]);
+  }, [open, present, videoMode, video, playing, getTime, pauseMusic, hasMusic]);
   const [translation, setTranslation] = useState(false);
   const [offset, setOffset] = useState(0);
   useEffect(() => setMounted(true), []);
@@ -212,7 +240,7 @@ export default function Karaoke({open, onClose, lines, getTime, onSeek, title, a
   return <>{!present && children}{mounted && createPortal(<dialog ref={dialog} className={`karaoke-dialog ${open ? "is-open" : "is-closing"} ${videoMode ? "is-video" : ""}`} onCancel={event => { event.preventDefault(); onClose(); }} aria-label="Fullscreen lyrics">
     <div className="karaoke-heading"><div><strong>{title || 'Linked song'}</strong><small>{artist}</small></div><div className="karaoke-options">{video && <button aria-pressed={videoMode} onClick={() => { setVideoError(false); setVideoMode(!videoMode); }}>{videoMode ? 'Live lyrics' : 'Video'}</button>}{!videoMode && <button onClick={() => setTranslation(!translation)}>{translation ? 'Translation' : 'Original'}</button>}<button onClick={onClose} aria-label="Close fullscreen lyrics"><PlayerIcon name="close"/></button></div></div>
     <div className="karaoke-stage" ref={stage}>
-      {videoMode && video ? <video ref={videoElement} className="fullscreen-video" src={video.url} controls={video.hasAudio || !hasMusic} muted={!video.hasAudio} playsInline preload="metadata" onError={() => setVideoError(true)}/> : !groups.length ? <div className="karaoke-empty"><h2>No word timings yet</h2><p>Time the {translation ? 'translated' : 'original'} lyrics in the Mac app and publish again.</p></div> : <div className="karaoke-flow" ref={flow}><KaraokeFlow groups={groups} focus={focus} offset={offset} translation={translation} onSeek={handleSeek}/></div>}
+      {videoMode && video ? <video ref={videoElement} className="fullscreen-video" controls={video.hasAudio || !hasMusic} muted={!video.hasAudio} playsInline preload="metadata" onError={() => { if (videoElement.current?.src === video.url) setVideoError(true); }}/> : !groups.length ? <div className="karaoke-empty"><h2>No word timings yet</h2><p>Time the {translation ? 'translated' : 'original'} lyrics in the Mac app and publish again.</p></div> : <div className="karaoke-flow" ref={flow}><KaraokeFlow groups={groups} focus={focus} offset={offset} translation={translation} onSeek={handleSeek}/></div>}
     </div>
     {videoMode && videoError && <div className="status player-status" role="alert">Video could not load. Switch to live lyrics or try again.</div>}
     {present && !(videoMode && video?.hasAudio) && children}

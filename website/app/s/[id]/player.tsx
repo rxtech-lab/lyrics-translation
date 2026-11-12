@@ -22,7 +22,7 @@ declare global { interface Window { MusicKit: {configure: (c: unknown) => Promis
 const seconds = (value: number) => Number.isFinite(value) ? Math.max(0, value) : 0;
 const clock = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
 
-export default function Player({id, song, title, artist, artworkURL, lines, initialStarred, initialStars, tokenCount, usageSummary, children, video}: {video?: {url: string; hasAudio: boolean}; children?: ReactNode; initialStarred:boolean; initialStars:number; tokenCount:number; usageSummary?:Document['usageSummary']; lines: Document["lines"]; id: string; song?: string; title?: string; artist?: string; artworkURL?: string | null}) {
+export default function Player({id, song, title, artist, artworkURL, lines, initialStarred, initialStars, tokenCount, usageSummary, children, video}: {video?: {url: string; hasAudio: boolean; streamingURL?: string}; children?: ReactNode; initialStarred:boolean; initialStars:number; tokenCount:number; usageSummary?:Document['usageSummary']; lines: Document["lines"]; id: string; song?: string; title?: string; artist?: string; artworkURL?: string | null}) {
   const [failedArtwork, setFailedArtwork] = useState<string | null>(null);
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [starred, setStarred] = useState(initialStarred);
