@@ -1,0 +1,43 @@
+name: macOS Build
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: rxtech-lab/RxAgentSDK
+          token: ${{ secrets.RELEASE_TOKEN }}
+          path: dependencies/RxAgentSDK
+      - uses: actions/checkout@v7
+        with:
+          repository: rxtech-lab/film-workflow
+          token: ${{ secrets.RELEASE_TOKEN }}
+          path: dependencies/film-workflow
+      - name: Configure CI package paths
+        run: sed -i '' 's|../rxlab/|dependencies/|g' project.yml
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+      - name: Build macOS app
+        run: >-
+          xcodebuild -project LyricStudio.xcodeproj -scheme LyricStudio
+          -configuration Release -destination 'generic/platform=macOS'
+          -derivedDataPath build/DerivedData
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO build
